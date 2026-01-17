@@ -1,6 +1,7 @@
 import { UserStats, UserPreferences, Note, Summary, QueueItem, RoutineTask, Quiz } from '../types';
 import { db } from '../firebaseConfig';
-import { doc, getDoc, setDoc, collection, getDocs, writeBatch, query, where } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, getDocs, writeBatch, query, where, serverTimestamp } from 'firebase/firestore';
+import { FirebaseService } from './firebaseService';
 
 
 const LOCAL_KEYS = {
@@ -42,20 +43,20 @@ let currentUserId: string | null = null;
 let isGuestMode: boolean = true;
 
 export const StorageService = {
-    
-    
+
+
 
     setSession: (user: UserPreferences) => {
         currentUserId = user.id;
         isGuestMode = user.isGuest;
         if (user.isGuest) {
             localStorage.setItem(LOCAL_KEYS.USER_SESSION, user.id);
-            
+
             const users = JSON.parse(localStorage.getItem(LOCAL_KEYS.USERS_DB) || '{}');
             users[user.id] = user;
             localStorage.setItem(LOCAL_KEYS.USERS_DB, JSON.stringify(users));
         } else {
-            localStorage.removeItem(LOCAL_KEYS.USER_SESSION); 
+            localStorage.removeItem(LOCAL_KEYS.USER_SESSION);
         }
     },
 
@@ -72,7 +73,7 @@ export const StorageService = {
         const timestamp = Date.now();
         const shortId = timestamp.toString().slice(-4);
         const guestId = `guest_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
-        
+
         return {
             id: guestId,
             isGuest: true,
@@ -84,17 +85,17 @@ export const StorageService = {
         };
     },
 
-   
+
 
     getUserProfile: async (userId: string): Promise<UserPreferences | null> => {
-        
+
         try {
             const docRef = doc(db, 'users', userId);
             const snap = await getDoc(docRef);
             if (snap.exists()) {
                 return snap.data() as UserPreferences;
             }
-            return null; 
+            return null;
         } catch (e) {
             console.error("Error fetching profile", e);
             return null;
@@ -111,7 +112,7 @@ export const StorageService = {
         }
     },
 
-    
+
 
     getStats: async (): Promise<UserStats> => {
         if (!currentUserId) return createEmptyStats('unknown');
@@ -126,12 +127,12 @@ export const StorageService = {
             }
             return stats;
         } else {
-            
+
             const docRef = doc(db, 'users', currentUserId, 'data', 'stats');
             const snap = await getDoc(docRef);
             if (snap.exists()) return snap.data() as UserStats;
-            
-            
+
+
             const newStats = createEmptyStats(currentUserId);
             await setDoc(docRef, newStats);
             return newStats;
@@ -140,7 +141,7 @@ export const StorageService = {
 
     updateStats: async (updater: (prev: UserStats) => UserStats) => {
         if (!currentUserId) return;
-        
+
         const current = await StorageService.getStats();
         const updated = updater(current);
 
@@ -190,10 +191,10 @@ export const StorageService = {
         });
     },
 
-    
+
 
     migrateData: async (guestId: string, authId: string) => {
-        
+
         const notes = getLocalUserItems<Note>(LOCAL_KEYS.NOTES, guestId);
         const summaries = getLocalUserItems<Summary>(LOCAL_KEYS.SUMMARIES, guestId);
         const queue = getLocalUserItems<QueueItem>(LOCAL_KEYS.QUEUE, guestId);
@@ -201,71 +202,140 @@ export const StorageService = {
         const allStats = getLocalDB<UserStats>(LOCAL_KEYS.STATS);
         const guestStats = allStats.find(s => s.userId === guestId);
 
-        
+
         const batch = writeBatch(db);
-        
-        
+
+
         notes.forEach(item => {
-            const ref = doc(db, 'users', authId, 'notes', item.id);
-            batch.set(ref, { ...item, userId: authId });
+            const ref = doc(db, 'notes', item.id);
+            // Ensure schema compliance
+            batch.set(ref, {
+                ...item,
+                userId: authId,
+                ownerId: authId,
+                updatedAt: serverTimestamp(),
+                createdAt: item.createdAt || createTimestampFromDate(item.lastModified)
+            }, { merge: true });
         });
-        
-        
+
+
         summaries.forEach(item => {
             const ref = doc(db, 'users', authId, 'summaries', item.id);
             batch.set(ref, { ...item, userId: authId });
         });
 
-       
+
         queue.forEach(item => {
-             const ref = doc(db, 'users', authId, 'queue', item.id);
-             batch.set(ref, { ...item, userId: authId });
+            const ref = doc(db, 'users', authId, 'queue', item.id);
+            batch.set(ref, { ...item, userId: authId });
         });
 
-        
+
         tasks.forEach(item => {
-             const ref = doc(db, 'users', authId, 'tasks', item.id);
-             batch.set(ref, { ...item, userId: authId });
+            const ref = doc(db, 'users', authId, 'tasks', item.id);
+            batch.set(ref, { ...item, userId: authId });
         });
 
-        
+
         const quizzes = getLocalUserItems<Quiz>(LOCAL_KEYS.QUIZZES, guestId);
         quizzes.forEach(item => {
-             const ref = doc(db, 'users', authId, 'quizzes', item.id);
-             batch.set(ref, { ...item, userId: authId });
+            const ref = doc(db, 'users', authId, 'quizzes', item.id);
+            batch.set(ref, { ...item, userId: authId });
         });
 
-        
+
         if (guestStats) {
-             const statsRef = doc(db, 'users', authId, 'data', 'stats');
-             // We just overwrite or set for simplicity, real app might merge
-             batch.set(statsRef, { ...guestStats, userId: authId, id: `stats_${authId}` });
+            const statsRef = doc(db, 'users', authId, 'data', 'stats');
+            // We just overwrite or set for simplicity, real app might merge
+            batch.set(statsRef, { ...guestStats, userId: authId, id: `stats_${authId}` });
         }
 
         await batch.commit();
     },
 
-    
-    
+
+
+    // --- Notes ---
+
+    deleteNote: async (noteId: string) => {
+        if (!currentUserId) return;
+        if (isGuestMode) {
+            const notes = getLocalUserItems<Note>(LOCAL_KEYS.NOTES, currentUserId);
+            const filtered = notes.filter(n => n.id !== noteId);
+            saveLocalUserItems(LOCAL_KEYS.NOTES, currentUserId, filtered);
+        } else {
+            // Use FirebaseService
+            await FirebaseService.deleteNote(currentUserId, noteId);
+        }
+    },
+
+    saveNote: async (note: Note) => {
+        if (!currentUserId) return;
+        if (isGuestMode) {
+            const notes = getLocalUserItems<Note>(LOCAL_KEYS.NOTES, currentUserId);
+            const idx = notes.findIndex(n => n.id === note.id);
+            if (idx >= 0) {
+                notes[idx] = note;
+            } else {
+                notes.unshift(note);
+            }
+            saveLocalUserItems(LOCAL_KEYS.NOTES, currentUserId, notes);
+        } else {
+            // Updated to ensure backend fields are handled by FirebaseService if needed
+            // But we pass the whole note object. 
+            await FirebaseService.saveNote(currentUserId, note);
+        }
+    },
+
     getNotes: async (): Promise<Note[]> => {
-        return StorageService.loadCollection<Note>('notes');
+        if (!currentUserId) return [];
+        if (isGuestMode) {
+            return getLocalUserItems<Note>(LOCAL_KEYS.NOTES, currentUserId);
+        } else {
+            // Use "Single Source of Truth": Direct Firestore query on root collection
+            try {
+                // Also trigger migration opportunistically here if empty? 
+                // Or explicitly call migration on session init.
+                // Let's assume on-load migration is best called in setSession or distinct step.
+
+                const q = query(
+                    collection(db, 'notes'),
+                    where('ownerId', '==', currentUserId)
+                );
+                // We might want an index on ownerId + updatedAt desc, but basic query first.
+                // Adding orderBy might require index creation. Safe with client-side sort for now if small dataset.
+                const snap = await getDocs(q);
+                return snap.docs.map(doc => {
+                    const data = doc.data() as any;
+                    // Fix timestamps back to number/string if needed for app consistency
+                    return {
+                        ...data,
+                        createdAt: data.createdAt?.toMillis ? data.createdAt.toMillis() : data.createdAt,
+                        updatedAt: data.updatedAt?.toMillis ? data.updatedAt.toMillis() : data.updatedAt,
+                        publishedAt: data.publishedAt?.toMillis ? data.publishedAt.toMillis() : data.publishedAt,
+                        // Ensure arrays are arrays
+                        tags: data.tags || []
+                    } as Note;
+                });
+            } catch (e) {
+                console.error("Error fetching notes:", e);
+                return [];
+            }
+        }
     },
 
     saveNotes: async (notes: Note[]) => {
+        // Fallback for bulk save if needed, but prefer saveNote
         if (!currentUserId) return;
         if (isGuestMode) {
             saveLocalUserItems(LOCAL_KEYS.NOTES, currentUserId, notes);
         } else {
-            const batch = writeBatch(db);
-            notes.forEach(note => {
-                const ref = doc(db, 'users', currentUserId, 'notes', note.id);
-                batch.set(ref, note);
-            });
-            await batch.commit();
+            await FirebaseService.saveNotesBatch(currentUserId, notes);
         }
     },
 
-    
+
+    // --- Summaries ---
 
     getSummaries: async (): Promise<Summary[]> => {
         return StorageService.loadCollection<Summary>('summaries');
@@ -285,7 +355,18 @@ export const StorageService = {
         }
     },
 
-    
+    publishNote: async (note: Note) => {
+        if (!currentUserId || isGuestMode) return;
+        await FirebaseService.publishNote(currentUserId, note);
+    },
+
+    unpublishNote: async (noteId: string) => {
+        if (!currentUserId || isGuestMode) return;
+        await FirebaseService.unpublishNote(currentUserId, noteId);
+    },
+
+
+    // --- Queue & Tasks (Unchanged) ---
 
     getQueue: async (): Promise<QueueItem[]> => {
         return StorageService.loadCollection<QueueItem>('queue');
@@ -305,7 +386,7 @@ export const StorageService = {
         }
     },
 
-    
+
 
     getTasks: async (): Promise<RoutineTask[]> => {
         return StorageService.loadCollection<RoutineTask>('tasks');
@@ -325,7 +406,8 @@ export const StorageService = {
         }
     },
 
-    
+
+    // --- Quizzes ---
 
     getQuizzes: async (): Promise<Quiz[]> => {
         return StorageService.loadCollection<Quiz>('quizzes');
@@ -348,15 +430,15 @@ export const StorageService = {
         }
     },
 
-   
 
-    
+    // --- Helpers ---
+
     loadCollection: async <T extends { userId: string }>(collectionName: string): Promise<T[]> => {
         if (!currentUserId) return [];
         if (isGuestMode) {
-            
+
             const map: Record<string, string> = {
-                'notes': LOCAL_KEYS.NOTES,
+                'notes': LOCAL_KEYS.NOTES, // Should not be called via loadCollection anymore for notes ideally
                 'summaries': LOCAL_KEYS.SUMMARIES,
                 'queue': LOCAL_KEYS.QUEUE,
                 'tasks': LOCAL_KEYS.TASKS,
@@ -369,6 +451,13 @@ export const StorageService = {
             const colRef = collection(db, 'users', currentUserId, collectionName);
             const snap = await getDocs(colRef);
             return snap.docs.map(d => d.data() as T);
+        }
+    },
+
+    // Added migration call helper
+    runCalculatedMigration: async () => {
+        if (currentUserId && !isGuestMode) {
+            await FirebaseService.migrateNotesToRoot(currentUserId);
         }
     }
 };
@@ -395,4 +484,10 @@ export const saveQuiz = async (quiz: Quiz) => {
 
 export const getQuizzes = async (userId: string): Promise<Quiz[]> => {
     return StorageService.getQuizzes();
+};
+
+const createTimestampFromDate = (dateVal: any) => {
+    if (typeof dateVal === 'number') return new Date(dateVal);
+    if (dateVal instanceof Date) return dateVal;
+    return serverTimestamp();
 };

@@ -1,7 +1,7 @@
-export type ViewState = 'landing' | 'onboarding' | 'dashboard' | 'summarizer' | 'notes' | 'routine' | 'focus' | 'quiz';
+export type ViewState = 'landing' | 'onboarding' | 'dashboard' | 'summarizer' | 'notes' | 'routine' | 'focus' | 'quiz' | 'feed' | 'store';
 
 export interface UserPreferences {
-  id: string; 
+  id: string;
   isGuest: boolean;
   name: string;
   freeTimeHours: number;
@@ -17,9 +17,9 @@ export interface UserStats {
   notesCreated: number;
   quizzesTaken: number;
   loginStreak: number;
-  lastLoginDate: string; 
-  dailyActivity: Record<string, number>; 
-  highScore: number; 
+  lastLoginDate: string;
+  dailyActivity: Record<string, number>;
+  highScore: number;
 }
 
 
@@ -33,25 +33,51 @@ export interface NoteElement {
   width: number;
   height: number;
   content?: string;
-  src?: string; 
+  src?: string;
   color?: string;
-  fontSize?: 'small' | 'medium' | 'large'; 
-  
+  fontSize?: 'small' | 'medium' | 'large';
 
-  startId?: string; 
-  endId?: string; 
-  
+
+  startId?: string;
+  endId?: string;
+
   zIndex: number;
+}
+
+export interface NoteDocument {
+  blocks: any[]; // Tiptap JSON content
+}
+
+export interface NoteCanvas {
+  elements: NoteElement[]; // Replaces top-level elements
+  strokes?: any[]; // For future drawing support
 }
 
 export interface Note {
   id: string;
-  userId: string; 
+  userId: string;
+  ownerId?: string; // Firebase owner
   title: string;
-  elements: NoteElement[]; 
+
+  // Dual-section architecture
+  document?: NoteDocument;
+  canvas?: NoteCanvas;
+
+  // Legacy support (to be migrated)
+  elements?: NoteElement[];
+
   tags: string[];
   folder: string;
   lastModified: number;
+
+  // Persistence
+  createdAt?: number | any;
+  updatedAt?: number | any;
+
+  isPublic?: boolean; // For community store
+  publishedAt?: number | any;
+  likes?: number;
+
   aiAnalysis?: {
     difficulty: 'easy' | 'medium' | 'hard';
     estimatedMinutes: number;
@@ -62,7 +88,7 @@ export interface Note {
 
 export interface QueueItem {
   id: string;
-  userId: string; 
+  userId: string;
   noteId: string;
   priority: 'high' | 'medium' | 'low';
   deadline?: number;
@@ -72,8 +98,8 @@ export interface QueueItem {
 
 export interface Flashcard {
   id: string;
-  front: string; 
-  back: string; 
+  front: string;
+  back: string;
   status: 'new' | 'learning' | 'mastered';
 }
 
@@ -83,13 +109,13 @@ export interface Attachment {
   type: 'image' | 'audio' | 'pdf' | 'url';
   content: string;
   mimeType?: string;
-  name?: string; 
+  name?: string;
 }
 
 export interface Summary {
   id: string;
-  userId: string; 
-  originalSource: string; 
+  userId: string;
+  originalSource: string;
   summaryText: string;
   type: 'text' | 'video' | 'article' | 'pdf' | 'audio' | 'mixed';
   mode: 'short' | 'detailed' | 'eli5' | 'exam';
@@ -99,13 +125,13 @@ export interface Summary {
 
 export interface RoutineTask {
   id: string;
-  userId: string; 
+  userId: string;
   title: string;
   durationMinutes: number;
-  type: 'focus' | 'break' | 'buffer' | 'procastify'; 
+  type: 'focus' | 'break' | 'buffer' | 'procastify';
   completed: boolean;
   timeSlot?: string;
-  noteId?: string; 
+  noteId?: string;
   confidence?: 'high' | 'medium' | 'low';
 }
 
@@ -119,7 +145,7 @@ export interface Question {
 
 export interface Quiz {
   id: string;
-  userId: string; 
+  userId: string;
   title: string;
   questions: Question[];
   highScore: number;

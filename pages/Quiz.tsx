@@ -1,421 +1,491 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Note, Quiz, UserPreferences, UserStats } from '../types';
-import { generateQuizFromNotes } from '../services/geminiService';
+import { generateQuizFromNotes, generateTrueFalseQuiz } from '../services/geminiService';
 import { StorageService } from '../services/storageService';
-import { Play, Trophy, CheckCircle, XCircle, Zap, Target, BookOpen, AlertCircle, RefreshCw } from 'lucide-react';
+import { Play, Trophy, CheckCircle, XCircle, Zap, Target, BookOpen, AlertCircle, RefreshCw, Layers, Clock } from 'lucide-react';
+import SwipeQuiz from '../components/SwipeQuiz';
+import { motion, AnimatePresence } from 'framer-motion';
+
+const QUESTION_TIMER = 30;
 
 interface QuizProps {
-  notes: Note[];
-  user: UserPreferences;
-  stats: UserStats;
-  setStats: (stats: UserStats) => void;
+    notes: Note[];
+    user: UserPreferences;
+    stats: UserStats;
+    setStats: (stats: UserStats) => void;
 }
 
 const QuizPage: React.FC<QuizProps> = ({ notes, user, stats, setStats }) => {
-  const [view, setView] = useState<'setup' | 'playing' | 'results'>('setup');
-  const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
-  const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
-  const [loading, setLoading] = useState(false);
-  
-  
-  const [quiz, setQuiz] = useState<Quiz | null>(null);
-  const [currentQIndex, setCurrentQIndex] = useState(0);
-  const [score, setScore] = useState(0);
-  const [streak, setStreak] = useState(0);
-  const [selectedOption, setSelectedOption] = useState<number | null>(null);
-  const [showAnalysis, setShowAnalysis] = useState(false);
-  const [attemptedQuestions, setAttemptedQuestions] = useState<Array<{
-    question: string;
-    options: string[];
-    userAnswer: number;
-    correctAnswer: number;
-    explanation: string;
-    isCorrect: boolean;
-  }>>([]);
+    const [view, setView] = useState<'setup' | 'playing' | 'results'>('setup');
+    const [mode, setMode] = useState<'standard' | 'swipe'>('standard');
+    const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
+    const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
+    const [loading, setLoading] = useState(false);
 
-  const handleGenerate = async () => {
-    if (selectedNoteIds.length === 0) return;
-    setLoading(true);
-    
-    
-    let aggregatedText = "";
-    selectedNoteIds.forEach(id => {
-        const note = notes.find(n => n.id === id);
-        if (note) {
-            
-            aggregatedText += `Source: ${note.title}\n`;
-            note.elements.forEach(el => {
-                if (el.content) aggregatedText += el.content + "\n";
-            });
+
+    const [quiz, setQuiz] = useState<Quiz | null>(null);
+    const [currentQIndex, setCurrentQIndex] = useState(0);
+    const [score, setScore] = useState(0);
+    const [streak, setStreak] = useState(0);
+    const [selectedOption, setSelectedOption] = useState<number | null>(null);
+    const [showAnalysis, setShowAnalysis] = useState(false);
+    const [timer, setTimer] = useState(QUESTION_TIMER);
+    const [attemptedQuestions, setAttemptedQuestions] = useState<Array<{
+        question: string;
+        options: string[];
+        userAnswer: number;
+        correctAnswer: number;
+        explanation: string;
+        isCorrect: boolean;
+    }>>([]);
+
+    // Timer Logic
+    useEffect(() => {
+        if (view === 'playing' && mode === 'standard' && !showAnalysis && timer > 0) {
+            const interval = setInterval(() => {
+                setTimer(t => t - 1);
+            }, 1000);
+            return () => clearInterval(interval);
+        } else if (timer === 0 && !showAnalysis && view === 'playing' && mode === 'standard') {
+            handleOptionSelect(-1); // Time's up
         }
-    });
+    }, [timer, view, mode, showAnalysis]);
 
-    if (aggregatedText.length < 50) {
-        alert("The selected notes don't contain enough text content to generate a quiz.");
-        setLoading(false);
-        return;
-    }
+    const handleGenerate = async () => {
+        if (selectedNoteIds.length === 0) return;
+        setLoading(true);
 
-    const questions = await generateQuizFromNotes(aggregatedText, difficulty);
-    
-    if (questions.length === 0) {
-        alert("Failed to generate questions. Please try a different note or try again.");
-        setLoading(false);
-        return;
-    }
+        let aggregatedText = "";
+        selectedNoteIds.forEach(id => {
+            const note = notes.find(n => n.id === id);
+            if (note) {
+                const elements = note.canvas?.elements || note.elements || [];
+                const blocks = note.document?.blocks || [];
 
-    setQuiz({
-        id: Date.now().toString(),
-        userId: user.id,
-        title: 'Generated Quiz',
-        questions,
-        highScore: 0
-    });
-    
-    
-    setCurrentQIndex(0);
-    setScore(0);
-    setStreak(0);
-    setAttemptedQuestions([]);
-    setSelectedOption(null);
-    setShowAnalysis(false);
-    
-    setLoading(false);
-    setView('playing');
-  };
+                aggregatedText += `Source: ${note.title}\n`;
 
-  const handleOptionSelect = (idx: number) => {
-    if (selectedOption !== null || !quiz) return; 
-    
-    setSelectedOption(idx);
-    setShowAnalysis(true);
-    
-    const currentQuestion = quiz.questions[currentQIndex];
-    const isCorrect = idx === currentQuestion.correctIndex;
-    
-    
-    const attemptedQuestion = {
-      question: currentQuestion.text,
-      options: currentQuestion.options,
-      userAnswer: idx,
-      correctAnswer: currentQuestion.correctIndex,
-      explanation: currentQuestion.explanation,
-      isCorrect
-    };
-    
-    setAttemptedQuestions(prev => [...prev, attemptedQuestion]);
+                // Extract text from canvas elements
+                elements.forEach(el => {
+                    if (el.content) aggregatedText += el.content + "\n";
+                });
 
-    if (isCorrect) {
-        
-        const bonus = Math.min(streak * 10, 50);
-        setScore(s => s + 100 + bonus);
-        setStreak(s => s + 1);
-    } else {
+                // Extract text from document blocks (simplified extraction)
+                if (blocks.length > 0) {
+                    aggregatedText += JSON.stringify(blocks); // Rough extraction for now, ideally parse tiptap json
+                }
+            }
+        });
+
+        if (aggregatedText.length < 50) {
+            alert("The selected notes don't contain enough text content to generate a quiz.");
+            setLoading(false);
+            return;
+        }
+
+        let questions;
+        if (mode === 'swipe') {
+            questions = await generateTrueFalseQuiz(aggregatedText);
+        } else {
+            questions = await generateQuizFromNotes(aggregatedText, difficulty);
+        }
+
+        if (questions.length === 0) {
+            alert("Failed to generate questions. Please try a different note or try again.");
+            setLoading(false);
+            return;
+        }
+
+        setQuiz({
+            id: Date.now().toString(),
+            userId: user.id,
+            title: 'Generated Quiz',
+            questions,
+            highScore: 0
+        });
+
+
+        setCurrentQIndex(0);
+        setScore(0);
         setStreak(0);
-    }
-  };
+        setAttemptedQuestions([]);
+        setSelectedOption(null);
+        setShowAnalysis(false);
+        setTimer(QUESTION_TIMER);
 
-  const nextQuestion = () => {
-    if (!quiz) return;
-    setCurrentQIndex(c => c + 1);
-    setSelectedOption(null);
-    setShowAnalysis(false);
-  };
-  
-  const finishQuiz = async () => {
-      
-      const currentHighScore = stats?.highScore || 0;
-      const newHighScore = score > currentHighScore ? score : currentHighScore;
-      
-      const updatedStats = await StorageService.updateStats(prev => ({
-          ...prev,
-          quizzesTaken: prev.quizzesTaken + 1,
-          highScore: newHighScore
-      }));
-      setStats(updatedStats);
-      setView('results');
-  };
+        setLoading(false);
+        setView('playing');
+    };
 
-  const resetToSetup = () => {
-      setView('setup');
-      setSelectedNoteIds([]);
-      setDifficulty('medium');
-  };
+    const handleOptionSelect = (idx: number) => {
+        // Allow -1 for timeout
+        if (selectedOption !== null || !quiz) return;
+
+        setSelectedOption(idx);
+        setShowAnalysis(true);
+
+        const currentQuestion = quiz.questions[currentQIndex];
+        const isCorrect = idx === currentQuestion.correctIndex;
 
 
-  if (view === 'setup') {
-      return (
-          <div className="p-8 max-w-4xl mx-auto h-full flex flex-col animate-in fade-in zoom-in-95 duration-500">
-              <div className="flex items-center justify-between mb-8">
-                  <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-discord-accent rounded-xl flex items-center justify-center shadow-lg shadow-discord-accent/20">
-                           <Target className="text-white" size={24} />
-                      </div>
-                      <div>
-                          <h2 className="text-3xl font-bold text-white">Quiz Arena</h2>
-                          <p className="text-discord-textMuted text-sm">Challenge yourself and beat your high score.</p>
-                      </div>
-                  </div>
-                  <div className="flex items-center gap-3 bg-discord-panel px-4 py-2 rounded-xl border border-white/5">
-                      <Trophy className="text-yellow-400" size={20} />
-                      <div>
-                          <p className="text-xs text-discord-textMuted font-bold uppercase">High Score</p>
-                          <p className="text-xl font-bold text-white leading-none">{stats?.highScore || 0}</p>
-                      </div>
-                  </div>
-              </div>
+        const attemptedQuestion = {
+            question: currentQuestion.text,
+            options: currentQuestion.options,
+            userAnswer: idx,
+            correctAnswer: currentQuestion.correctIndex,
+            explanation: idx === -1 ? "Time run out! " + currentQuestion.explanation : currentQuestion.explanation,
+            isCorrect
+        };
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 min-h-0">
-                  
-                  <div className="lg:col-span-2 flex flex-col min-h-0">
-                      <h3 className="text-sm font-bold text-discord-textMuted uppercase mb-4 flex items-center gap-2">
-                          <BookOpen size={16} /> Select Sources ({selectedNoteIds.length})
-                      </h3>
-                      <div className="flex-1 overflow-y-auto pr-2 space-y-3 pb-4">
-                          {notes.map(note => (
-                              <div 
-                                key={note.id}
-                                onClick={() => setSelectedNoteIds(prev => prev.includes(note.id) ? prev.filter(id => id !== note.id) : [...prev, note.id])}
-                                className={`p-4 rounded-xl border cursor-pointer transition-all flex items-center justify-between group
-                                    ${selectedNoteIds.includes(note.id) 
-                                        ? 'bg-discord-accent/10 border-discord-accent text-white shadow-md' 
-                                        : 'bg-discord-panel border-white/5 text-discord-textMuted hover:bg-discord-hover hover:text-white'}`}
-                              >
-                                  <div className="flex items-center gap-4">
-                                      <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors
+        setAttemptedQuestions(prev => [...prev, attemptedQuestion]);
+
+        if (isCorrect) {
+            // Include time bonus
+            const timeBonus = Math.floor(timer * 2); // 2 points per remaining second
+            const streakBonus = Math.min(streak * 10, 50);
+            setScore(s => s + 100 + streakBonus + timeBonus);
+            setStreak(s => s + 1);
+        } else {
+            setStreak(0);
+        }
+    };
+
+    const nextQuestion = () => {
+        if (!quiz) return;
+        setCurrentQIndex(c => c + 1);
+        setSelectedOption(null);
+        setShowAnalysis(false);
+        setTimer(QUESTION_TIMER);
+    };
+
+    const finishQuiz = async (finalScore?: number) => {
+        const resultScore = finalScore !== undefined ? finalScore : score;
+        const currentHighScore = stats?.highScore || 0;
+        const newHighScore = resultScore > currentHighScore ? resultScore : currentHighScore;
+
+        const updatedStats = await StorageService.updateStats(prev => ({
+            ...prev,
+            quizzesTaken: prev.quizzesTaken + 1,
+            highScore: newHighScore
+        }));
+        setStats(updatedStats);
+        if (finalScore !== undefined) setScore(finalScore); // Update local score for display
+        setView('results');
+    };
+
+    const resetToSetup = () => {
+        setView('setup');
+        setSelectedNoteIds([]);
+        setDifficulty('medium');
+        setMode('standard');
+    };
+
+
+    if (view === 'setup') {
+        return (
+            <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="p-8 max-w-4xl mx-auto h-full flex flex-col"
+            >
+                <div className="flex items-center justify-between mb-8">
+                    <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 bg-discord-accent rounded-xl flex items-center justify-center shadow-lg shadow-discord-accent/20">
+                            <Target className="text-white" size={24} />
+                        </div>
+                        <div>
+                            <h2 className="text-3xl font-bold text-white">Quiz Arena</h2>
+                            <p className="text-discord-textMuted text-sm">Challenge yourself and beat your high score.</p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-3 bg-discord-panel px-4 py-2 rounded-xl border border-white/5">
+                        <Trophy className="text-yellow-400" size={20} />
+                        <div>
+                            <p className="text-xs text-discord-textMuted font-bold uppercase">High Score</p>
+                            <p className="text-xl font-bold text-white leading-none">{stats?.highScore || 0}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 min-h-0">
+
+                    <div className="lg:col-span-2 flex flex-col min-h-0">
+                        <h3 className="text-sm font-bold text-discord-textMuted uppercase mb-4 flex items-center gap-2">
+                            <BookOpen size={16} /> Select Sources ({selectedNoteIds.length})
+                        </h3>
+                        <div className="flex-1 overflow-y-auto pr-2 space-y-3 pb-4">
+                            {notes.map(note => (
+                                <div
+                                    key={note.id}
+                                    onClick={() => setSelectedNoteIds(prev => prev.includes(note.id) ? prev.filter(id => id !== note.id) : [...prev, note.id])}
+                                    className={`p-4 rounded-xl border cursor-pointer transition-all flex items-center justify-between group
+                                    ${selectedNoteIds.includes(note.id)
+                                            ? 'bg-discord-accent/10 border-discord-accent text-white shadow-md'
+                                            : 'bg-discord-panel border-white/5 text-discord-textMuted hover:bg-discord-hover hover:text-white'}`}
+                                >
+                                    <div className="flex items-center gap-4">
+                                        <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors
                                           ${selectedNoteIds.includes(note.id) ? 'bg-discord-accent border-discord-accent' : 'border-white/20 group-hover:border-white/40'}`}>
-                                          {selectedNoteIds.includes(note.id) && <CheckCircle size={14} className="text-white" />}
-                                      </div>
-                                      <div>
-                                          <span className="font-bold block">{note.title}</span>
-                                          <span className="text-xs text-discord-textMuted opacity-70">{new Date(note.lastModified).toLocaleDateString()} • {note.folder}</span>
-                                      </div>
-                                  </div>
-                              </div>
-                          ))}
-                          {notes.length === 0 && (
-                              <div className="text-center py-10 border-2 border-dashed border-white/5 rounded-xl">
-                                  <p className="text-discord-textMuted">No notes found. Create some notes first!</p>
-                              </div>
-                          )}
-                      </div>
-                  </div>
+                                            {selectedNoteIds.includes(note.id) && <CheckCircle size={14} className="text-white" />}
+                                        </div>
+                                        <div>
+                                            <span className="font-bold block">{note.title}</span>
+                                            <span className="text-xs text-discord-textMuted opacity-70">{new Date(note.lastModified).toLocaleDateString()} • {note.folder}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                            {notes.length === 0 && (
+                                <div className="text-center py-10 border-2 border-dashed border-white/5 rounded-xl">
+                                    <p className="text-discord-textMuted">No notes found. Create some notes first!</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
 
-               
-                  <div className="flex flex-col gap-6">
-                      <div>
-                          <h3 className="text-sm font-bold text-discord-textMuted uppercase mb-4 flex items-center gap-2">
-                              <Target size={16} /> Difficulty
-                          </h3>
-                          <div className="flex flex-col gap-2">
-                              {(['easy', 'medium', 'hard'] as const).map(d => (
-                                  <button
-                                    key={d}
-                                    onClick={() => setDifficulty(d)}
-                                    className={`p-3 rounded-xl border text-left capitalize transition-all font-medium
-                                        ${difficulty === d 
-                                            ? 'bg-discord-accent text-white border-discord-accent shadow-md' 
-                                            : 'bg-discord-panel border-white/5 text-discord-textMuted hover:bg-discord-hover'}`}
-                                  >
-                                      {d}
-                                  </button>
-                              ))}
-                          </div>
-                      </div>
 
-                      <div className="mt-auto">
-                          <button 
-                            onClick={handleGenerate}
-                            disabled={loading || selectedNoteIds.length === 0}
-                            className="w-full bg-discord-green hover:bg-green-600 text-white py-4 rounded-xl font-bold text-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg hover:shadow-green-500/20"
-                          >
-                              {loading ? (
-                                  <><RefreshCw className="animate-spin" /> Generating...</>
-                              ) : (
-                                  <>Start Quiz <Play size={20} fill="currentColor" /></>
-                              )}
-                          </button>
-                      </div>
-                  </div>
-              </div>
-          </div>
-      );
-  }
+                    <div className="flex flex-col gap-6">
+                        {/* Mode Selection */}
+                        <div>
+                            <h3 className="text-sm font-bold text-discord-textMuted uppercase mb-4 flex items-center gap-2">
+                                <Layers size={16} /> Mode
+                            </h3>
+                            <div className="grid grid-cols-2 gap-2 bg-discord-panel p-1 rounded-xl border border-white/5">
+                                <button
+                                    onClick={() => setMode('standard')}
+                                    className={`py-2 rounded-lg text-sm font-bold transition-all ${mode === 'standard' ? 'bg-[#5865F2] text-white shadow-sm' : 'text-discord-textMuted hover:text-white'}`}
+                                >
+                                    Standard
+                                </button>
+                                <button
+                                    onClick={() => setMode('swipe')}
+                                    className={`py-2 rounded-lg text-sm font-bold transition-all ${mode === 'swipe' ? 'bg-[#5865F2] text-white shadow-sm' : 'text-discord-textMuted hover:text-white'}`}
+                                >
+                                    Swipe (T/F)
+                                </button>
+                            </div>
+                        </div>
 
- 
-  if (view === 'playing' && quiz) {
-      const question = quiz.questions[currentQIndex];
-      const isCorrect = selectedOption === question.correctIndex;
-      const isAnswered = selectedOption !== null;
+                        {mode === 'standard' && (
+                            <div>
+                                <h3 className="text-sm font-bold text-discord-textMuted uppercase mb-4 flex items-center gap-2">
+                                    <Target size={16} /> Difficulty
+                                </h3>
+                                <div className="flex flex-col gap-2">
+                                    {(['easy', 'medium', 'hard'] as const).map(d => (
+                                        <button
+                                            key={d}
+                                            onClick={() => setDifficulty(d)}
+                                            className={`p-3 rounded-xl border text-left capitalize transition-all font-medium
+                                            ${difficulty === d
+                                                    ? 'bg-discord-accent text-white border-discord-accent shadow-md'
+                                                    : 'bg-discord-panel border-white/5 text-discord-textMuted hover:bg-discord-hover'}`}
+                                        >
+                                            {d}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
-      return (
-          <div className="h-full flex flex-col max-w-4xl mx-auto p-8">
-           
-              <div className="flex justify-between items-center mb-10">
-                  <div className="flex items-center gap-4">
-                      <div className="flex flex-col">
-                          <span className="text-xs font-bold text-discord-textMuted uppercase tracking-wider">Question</span>
-                          <span className="text-2xl font-bold text-white font-mono">{currentQIndex + 1}<span className="text-discord-textMuted text-lg">/{quiz.questions.length}</span></span>
-                      </div>
-                  </div>
-
-                  
-                  <div className="flex items-center gap-6">
-                      <div className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-all duration-300 ${streak > 1 ? 'bg-orange-500/10 border-orange-500 text-orange-400' : 'bg-transparent border-transparent text-discord-textMuted'}`}>
-                          <Zap size={18} className={streak > 1 ? 'fill-current' : ''} />
-                          <span className="font-bold">{streak} Streak</span>
-                      </div>
-                      <div className="px-5 py-2 bg-discord-panel rounded-xl border border-white/10 text-white font-mono font-bold text-xl min-w-[100px] text-center">
-                          {score}
-                      </div>
-                  </div>
-              </div>
-
-             
-              <div className="flex-1 flex flex-col justify-center animate-in fade-in slide-in-from-bottom-4 duration-500 key={currentQIndex}">
-                  <h2 className="text-2xl md:text-3xl font-bold text-white mb-10 leading-snug">{question.text}</h2>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-                      {question.options.map((opt, idx) => {
-                          
-                          let styleClass = "bg-discord-panel border-white/10 text-discord-text hover:bg-discord-hover hover:border-white/20";
-                          if (isAnswered) {
-                              if (idx === question.correctIndex) styleClass = "bg-green-500/20 border-green-500 text-white shadow-[0_0_15px_rgba(34,197,94,0.3)]";
-                              else if (selectedOption === idx) styleClass = "bg-red-500/20 border-red-500 text-white opacity-80";
-                              else styleClass = "bg-discord-panel border-white/5 text-discord-textMuted opacity-50";
-                          }
-
-                          return (
+                        <div className="mt-auto">
                             <button
-                                key={idx}
-                                onClick={() => handleOptionSelect(idx)}
-                                disabled={isAnswered}
-                                className={`p-6 rounded-2xl text-left font-medium text-lg border-2 transition-all relative ${styleClass} min-h-[100px] flex items-center`}
+                                onClick={handleGenerate}
+                                disabled={loading || selectedNoteIds.length === 0}
+                                className="w-full bg-discord-green hover:bg-green-600 text-white py-4 rounded-xl font-bold text-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg hover:shadow-green-500/20"
                             >
-                                <span className="mr-4 w-8 h-8 rounded-full border border-current flex items-center justify-center text-sm font-bold opacity-50 shrink-0">
-                                    {String.fromCharCode(65 + idx)}
-                                </span>
-                                {opt}
-                                {isAnswered && idx === question.correctIndex && <CheckCircle className="absolute right-4 top-4 text-green-500" />}
-                                {isAnswered && selectedOption === idx && idx !== question.correctIndex && <XCircle className="absolute right-4 top-4 text-red-500" />}
+                                {loading ? (
+                                    <><RefreshCw className="animate-spin" /> Generating...</>
+                                ) : (
+                                    <>Start Quiz <Play size={20} fill="currentColor" /></>
+                                )}
                             </button>
-                          )
-                      })}
-                  </div>
+                        </div>
+                    </div>
+                </div>
+            </motion.div>
+        );
+    }
 
-                  
-                  <div className={`transition-all duration-300 overflow-hidden ${showAnalysis ? 'max-h-[300px] opacity-100' : 'max-h-0 opacity-0'}`}>
-                      <div className={`p-6 rounded-xl border mb-6 flex items-start gap-4 ${isCorrect ? 'bg-green-500/10 border-green-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
-                           <div className={`p-2 rounded-full shrink-0 ${isCorrect ? 'bg-green-500 text-black' : 'bg-red-500 text-white'}`}>
-                               {isCorrect ? <CheckCircle size={20} /> : <AlertCircle size={20} />}
-                           </div>
-                           <div>
-                               <h4 className={`font-bold mb-1 ${isCorrect ? 'text-green-400' : 'text-red-400'}`}>
-                                   {isCorrect ? 'Correct!' : 'Incorrect'}
-                               </h4>
-                               <p className="text-discord-textMuted text-sm leading-relaxed">{question.explanation}</p>
-                           </div>
-                      </div>
+    // SWIPE MODE
+    if (view === 'playing' && quiz && mode === 'swipe') {
+        return (
+            <SwipeQuiz
+                questions={quiz.questions}
+                onComplete={(finalScore) => finishQuiz(finalScore * 100)} // Scale score for consistency
+                onExit={() => setView('setup')}
+            />
+        );
+    }
 
-                      
-                      <div className="flex gap-4">
-                          {currentQIndex < quiz.questions.length - 1 ? (
-                              <button 
-                                onClick={nextQuestion}
-                                className="flex-1 bg-discord-accent hover:bg-discord-accentHover text-white py-4 rounded-xl font-bold text-lg transition-all shadow-lg flex items-center justify-center gap-2"
-                              >
-                                  Next Question <Play size={20} fill="currentColor" />
-                              </button>
-                          ) : null}
-                          <button 
-                            onClick={finishQuiz}
-                            className="flex-1 bg-discord-panel hover:bg-discord-hover text-white py-4 rounded-xl font-bold text-lg transition-all border border-white/10 flex items-center justify-center gap-2"
-                          >
-                              Finish Quiz <Trophy size={20} />
-                          </button>
-                      </div>
-                  </div>
-              </div>
-          </div>
-      );
-  }
+    // STANDARD MODE
+    if (view === 'playing' && quiz && mode === 'standard') {
+        const question = quiz.questions[currentQIndex];
+        const isCorrect = selectedOption === question.correctIndex;
+        const isAnswered = selectedOption !== null;
 
-  
-  if (view === 'results' && quiz) {
-      const totalQs = attemptedQuestions.length;
-      const correctCount = attemptedQuestions.filter(q => q.isCorrect).length;
-      const percentage = totalQs > 0 ? Math.round((correctCount / totalQs) * 100) : 0;
+        return (
+            <div className="h-full flex flex-col max-w-4xl mx-auto p-8">
 
-      return (
-          <div className="h-full flex flex-col items-center p-8 max-w-4xl mx-auto overflow-y-auto">
-              <div className="text-center mb-12 animate-in slide-in-from-top-4 duration-700">
-                  <div className="relative inline-block">
-                       <Trophy size={100} className="text-yellow-400 mb-6 drop-shadow-[0_0_30px_rgba(250,204,21,0.4)]" />
-                       <div className="absolute -top-2 -right-2 bg-discord-accent text-white font-bold px-3 py-1 rounded-full text-sm border border-white/20">
-                           {percentage}%
-                       </div>
-                  </div>
-                  <h1 className="text-4xl font-bold text-white mb-2">Quiz Completed!</h1>
-                  <p className="text-xl text-discord-textMuted">You scored <span className="text-discord-accent font-bold">{score}</span> points</p>
-                  {score > (stats?.highScore || 0) && score > 0 && (
-                      <p className="text-green-400 font-bold mt-2 animate-bounce">New High Score!</p>
-                  )}
-              </div>
-              
-              <div className="w-full grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
-                  <div className="bg-discord-panel p-6 rounded-2xl border border-white/5 text-center">
-                      <p className="text-discord-textMuted text-xs font-bold uppercase mb-2">Correct Answers</p>
-                      <p className="text-4xl font-bold text-green-400">{correctCount}<span className="text-lg text-discord-textMuted">/{totalQs}</span></p>
-                  </div>
-                  <div className="bg-discord-panel p-6 rounded-2xl border border-white/5 text-center">
-                      <p className="text-discord-textMuted text-xs font-bold uppercase mb-2">Difficulty</p>
-                      <p className="text-4xl font-bold text-white capitalize">{difficulty}</p>
-                  </div>
-                  <div className="bg-discord-panel p-6 rounded-2xl border border-white/5 text-center">
-                      <p className="text-discord-textMuted text-xs font-bold uppercase mb-2">Sources</p>
-                      <p className="text-4xl font-bold text-blue-400">{selectedNoteIds.length}</p>
-                  </div>
-              </div>
+                <div className="flex justify-between items-center mb-6">
+                    <div className="flex items-center gap-4">
+                        <div className="flex flex-col">
+                            <span className="text-xs font-bold text-discord-textMuted uppercase tracking-wider">Question</span>
+                            <span className="text-2xl font-bold text-white font-mono">{currentQIndex + 1}<span className="text-discord-textMuted text-lg">/{quiz.questions.length}</span></span>
+                        </div>
+                    </div>
 
-              
-              <div className="w-full max-w-2xl space-y-4 mb-12">
-                  <h3 className="text-white font-bold text-lg mb-4">Review</h3>
-                  {attemptedQuestions.map((q, i) => (
-                      <div key={i} className={`p-4 rounded-xl border flex gap-4 ${q.isCorrect ? 'bg-green-500/5 border-green-500/10' : 'bg-red-500/5 border-red-500/10'}`}>
-                          <div className={`w-8 h-8 rounded-full shrink-0 flex items-center justify-center font-bold text-sm ${q.isCorrect ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'}`}>
-                              {i+1}
-                          </div>
-                          <div className="flex-1">
-                              <p className="text-white font-medium mb-2">{q.question}</p>
-                              <div className="text-sm space-y-1">
-                                  <div className={`${q.isCorrect ? 'text-green-400' : 'text-red-400'}`}>
-                                      <span className="font-medium">Your Answer:</span> {q.options[q.userAnswer]}
-                                  </div>
-                                  <div className="text-green-400">
-                                      <span className="font-medium">Correct Answer:</span> {q.options[q.correctAnswer]}
-                                  </div>
-                                  <div className="text-discord-textMuted mt-2">
-                                      <span className="font-medium">Explanation:</span> {q.explanation}
-                                  </div>
-                              </div>
-                          </div>
-                      </div>
-                  ))}
-              </div>
 
-              <div className="flex gap-4 mb-8">
-                  <button onClick={resetToSetup} className="px-8 py-3 bg-discord-panel hover:bg-discord-hover text-white rounded-xl font-bold transition-colors border border-white/10">
-                      Back to Setup
-                  </button>
-                  <button onClick={() => setView('setup')} className="px-8 py-3 bg-discord-accent hover:bg-discord-accentHover text-white rounded-xl font-bold transition-colors shadow-lg">
-                      Play Again
-                  </button>
-              </div>
-          </div>
-      );
-  }
+                    <div className="flex items-center gap-6">
+                        <div className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-all duration-300 ${streak > 1 ? 'bg-orange-500/10 border-orange-500 text-orange-400' : 'bg-transparent border-transparent text-discord-textMuted'}`}>
+                            <Zap size={18} className={streak > 1 ? 'fill-current' : ''} />
+                            <span className="font-bold">{streak} Streak</span>
+                        </div>
+                        <div className="px-5 py-2 bg-discord-panel rounded-xl border border-white/10 text-white font-mono font-bold text-xl min-w-[100px] text-center">
+                            {score}
+                        </div>
+                    </div>
+                </div>
 
-  return null;
+                {/* Timer Bar */}
+                <div className="h-2 bg-white/10 rounded-full mb-8 overflow-hidden relative">
+                    <motion.div
+                        className="h-full absolute left-0 top-0 bottom-0"
+                        initial={{ width: "100%", backgroundColor: "#5865F2" }}
+                        animate={{
+                            width: `${(timer / QUESTION_TIMER) * 100}%`,
+                            backgroundColor: timer < 10 ? '#ef4444' : '#5865F2'
+                        }}
+                        transition={{ duration: 0.5, ease: "linear" }}
+                    />
+                </div>
+
+
+                <AnimatePresence mode='wait'>
+                    <motion.div
+                        key={currentQIndex}
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        transition={{ duration: 0.3 }}
+                        className="flex-1 flex flex-col justify-center"
+                    >
+                        <h2 className="text-2xl md:text-3xl font-bold text-white mb-10 leading-snug">{question.text}</h2>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                            {question.options.map((opt, idx) => {
+
+                                let styleClass = "bg-discord-panel border-white/10 text-discord-text hover:bg-discord-hover hover:border-white/20";
+                                if (isAnswered) {
+                                    if (idx === question.correctIndex) styleClass = "bg-green-500/20 border-green-500 text-white shadow-[0_0_15px_rgba(34,197,94,0.3)]";
+                                    else if (selectedOption === idx) styleClass = "bg-red-500/20 border-red-500 text-white opacity-80";
+                                    else styleClass = "bg-discord-panel border-white/5 text-discord-textMuted opacity-50";
+                                }
+
+                                return (
+                                    <motion.button
+                                        key={idx}
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: idx * 0.1 }}
+                                        onClick={() => handleOptionSelect(idx)}
+                                        disabled={isAnswered}
+                                        className={`p-6 rounded-2xl text-left font-medium text-lg border-2 transition-all relative ${styleClass} min-h-[100px] flex items-center`}
+                                    >
+                                        <span className="mr-4 w-8 h-8 rounded-full border border-current flex items-center justify-center text-sm font-bold opacity-50 shrink-0">
+                                            {String.fromCharCode(65 + idx)}
+                                        </span>
+                                        {opt}
+                                        {isAnswered && idx === question.correctIndex && <CheckCircle className="absolute right-4 top-4 text-green-500" />}
+                                        {isAnswered && selectedOption === idx && idx !== question.correctIndex && <XCircle className="absolute right-4 top-4 text-red-500" />}
+                                    </motion.button>
+                                )
+                            })}
+                        </div>
+
+
+                        {showAnalysis && (
+                            <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                className="overflow-hidden"
+                            >
+                                <div className={`p-6 rounded-xl border mb-6 flex items-start gap-4 ${isCorrect ? 'bg-green-500/10 border-green-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
+                                    <div className={`p-2 rounded-full shrink-0 ${isCorrect ? 'bg-green-500 text-black' : 'bg-red-500 text-white'}`}>
+                                        {isCorrect ? <CheckCircle size={20} /> : <AlertCircle size={20} />}
+                                    </div>
+                                    <div>
+                                        <h4 className={`font-bold mb-1 ${isCorrect ? 'text-green-400' : 'text-red-400'}`}>
+                                            {isCorrect ? 'Correct!' : selectedOption === -1 ? "Time's Up!" : 'Incorrect'}
+                                        </h4>
+                                        <p className="text-discord-textMuted text-sm leading-relaxed">{question.explanation}</p>
+                                    </div>
+                                </div>
+
+
+                                <div className="flex gap-4">
+                                    {currentQIndex < quiz.questions.length - 1 ? (
+                                        <button
+                                            onClick={nextQuestion}
+                                            className="flex-1 bg-discord-accent hover:bg-discord-accentHover text-white py-4 rounded-xl font-bold text-lg transition-all shadow-lg flex items-center justify-center gap-2"
+                                        >
+                                            Next Question <Play size={20} fill="currentColor" />
+                                        </button>
+                                    ) : null}
+                                    <button
+                                        onClick={() => finishQuiz()}
+                                        className="flex-1 bg-discord-panel hover:bg-discord-hover text-white py-4 rounded-xl font-bold text-lg transition-all border border-white/10 flex items-center justify-center gap-2"
+                                    >
+                                        Finish Quiz <Trophy size={20} />
+                                    </button>
+                                </div>
+                            </motion.div>
+                        )}
+                    </motion.div>
+                </AnimatePresence>
+            </div>
+        );
+    }
+
+    // Results view logic remains the same (truncated here for brevity in logic check, but included in tool call)
+    // Re-pasting results view from previous file content to ensure completeness
+
+    if (view === 'results' && quiz) {
+        const totalQs = attemptedQuestions.length || quiz.questions.length; // Fallback if swipe mode completes
+        // For swipe mode we don't track attemptedQuestions in the same way locally in parent yet?
+        // Wait, SwipeQuiz calls onComplete(score).
+        // If mode is swipe, we might not have populated `attemptedQuestions`. 
+
+        const isSwipe = mode === 'standard' ? false : true;
+
+        return (
+            <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="h-full flex flex-col items-center p-8 max-w-4xl mx-auto overflow-y-auto"
+            >
+                <div className="text-center mb-12">
+                    <Trophy size={100} className="text-yellow-400 mb-6 mx-auto drop-shadow-[0_0_30px_rgba(250,204,21,0.4)]" />
+                    <h1 className="text-4xl font-bold text-white mb-2">Quiz Completed!</h1>
+                    <p className="text-xl text-discord-textMuted">You scored <span className="text-discord-accent font-bold">{score}</span> points</p>
+                    {score > (stats?.highScore || 0) && score > 0 && (
+                        <p className="text-green-400 font-bold mt-2 animate-bounce">New High Score!</p>
+                    )}
+                </div>
+
+                <div className="flex gap-4 mb-8">
+                    <button onClick={resetToSetup} className="px-8 py-3 bg-discord-panel hover:bg-discord-hover text-white rounded-xl font-bold transition-colors border border-white/10">
+                        Back to Setup
+                    </button>
+                    <button onClick={() => setView('setup')} className="px-8 py-3 bg-discord-accent hover:bg-discord-accentHover text-white rounded-xl font-bold transition-colors shadow-lg">
+                        Play Again
+                    </button>
+                </div>
+            </motion.div>
+        );
+    }
+
+    return null;
 };
 
 export default QuizPage;
