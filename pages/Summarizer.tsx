@@ -254,37 +254,36 @@ const Summarizer: React.FC<SummarizerProps> = ({ onSave, notes, onAddToNote }) =
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-full min-h-0 flex-1">
 
-                <div className="flex flex-col gap-4 overflow-y-auto">
+                <div className="flex flex-col gap-2 overflow-y-auto">
 
 
                     <div>
-                        <div className="bg-discord-panel p-1 rounded-xl border border-white/5 flex gap-1 mb-3">
+                        <div className="bg-discord-panel p-1 rounded-xl border border-white/5 flex gap-1 mb-2">
                             {(['short', 'detailed', 'eli5', 'exam'] as const).map((m) => (
                                 <button
                                     key={m}
                                     onClick={() => setMode(m)}
-                                    className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wide transition-all
+                                    className={`flex-1 py-2 rounded-lg text-xs font-bold uppercase tracking-wide transition-all flex items-center justify-center
                                 ${mode === m
-                                        ? 'bg-discord-accent text-white shadow-md'
-                                        : 'text-discord-textMuted hover:bg-discord-hover'}`}
+                                            ? 'bg-discord-accent text-white shadow-md'
+                                            : 'text-discord-textMuted hover:bg-discord-hover'}`}
                                 >
                                     {m === 'eli5' ? 'ELI5' : m}
                                 </button>
                             ))}
-                            
-                            <div className="relative">
+
+                            <div className="relative flex">
                                 <button
                                     onClick={() => setShowCustomModeInput(!showCustomModeInput)}
-                                    className={`px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center ${
-                                        showCustomModeInput ? 'bg-discord-accent text-white' : 'text-discord-textMuted hover:bg-discord-hover'
-                                    }`}
+                                    className={`w-10 rounded-lg text-xs font-bold transition-all flex items-center justify-center flex-none ${showCustomModeInput ? 'bg-discord-accent text-white' : 'text-discord-textMuted hover:bg-discord-hover'
+                                        }`}
                                     title="Add custom mode"
                                 >
                                     +
                                 </button>
-                                
+
                                 {showCustomModeInput && (
-                                    <div className="absolute right-0 top-full mt-2 bg-discord-panel border border-white/10 rounded-lg shadow-2xl p-3 w-64 z-10 animate-in fade-in zoom-in-95">
+                                    <div className="absolute right-0 top-full mt-2 bg-discord-panel border border-white/10 rounded-lg shadow-2xl p-3 w-64 z-50 origin-top-right animate-in fade-in zoom-in-95">
                                         <input
                                             type="text"
                                             value={customModeText}
@@ -307,7 +306,7 @@ const Summarizer: React.FC<SummarizerProps> = ({ onSave, notes, onAddToNote }) =
                                 )}
                             </div>
                         </div>
-                        
+
                         <div className="flex items-center gap-2 px-2 py-1">
                             <span className="text-xs font-bold text-discord-textMuted uppercase">Current Mode:</span>
                             <span className="px-2 py-1 bg-discord-accent/20 border border-discord-accent/50 rounded text-xs font-bold text-discord-accent capitalize">

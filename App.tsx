@@ -28,6 +28,7 @@ const App: React.FC = () => {
     const [emailInput, setEmailInput] = useState('');
     const [passwordInput, setPasswordInput] = useState('');
     const [authError, setAuthError] = useState('');
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
     const deriveName = (email?: string | null) => {
         if (!email) return 'User';
@@ -331,8 +332,14 @@ const App: React.FC = () => {
 
     return (
         <div className="flex min-h-screen bg-[#1e1f22]">
-            <Sidebar currentView={view} onNavigate={setView} onLogout={handleLogout} />
-            <main className="flex-1 ml-64 overflow-y-auto max-h-screen relative">
+            <Sidebar
+                currentView={view}
+                onNavigate={setView}
+                onLogout={handleLogout}
+                collapsed={sidebarCollapsed}
+                onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+            />
+            <main className={`flex-1 ${sidebarCollapsed ? 'ml-20' : 'ml-64'} overflow-y-auto max-h-screen relative transition-all duration-300 ease-in-out`}>
                 {/* User Context Bar (Small) */}
                 {user.isGuest && (
                     <div className="bg-indigo-900/30 border-b border-indigo-500/20 px-4 py-1 text-xs text-indigo-200 flex justify-between items-center sticky top-0 z-50 backdrop-blur-md">
