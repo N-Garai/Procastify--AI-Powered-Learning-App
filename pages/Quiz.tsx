@@ -69,10 +69,12 @@ const QuizPage: React.FC<QuizProps> = ({ notes, user, stats, setStats }) => {
                     if (el.content) aggregatedText += el.content + "\n";
                 });
 
-                // Extract text from document blocks (simplified extraction)
-                if (blocks.length > 0) {
-                    aggregatedText += JSON.stringify(blocks); // Rough extraction for now, ideally parse tiptap json
-                }
+                // Extract text from document blocks
+                blocks.forEach(block => {
+                    if (block.content) {
+                        aggregatedText += block.content + "\n";
+                    }
+                });
             }
         });
 

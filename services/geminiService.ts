@@ -508,11 +508,21 @@ export const generateRoutine = async (prefs: UserPreferences): Promise<RoutineTa
 
 
 export const generateQuiz = async (note: Note): Promise<Question[]> => {
+  // Try document blocks first (new architecture)
+  let textContent = '';
 
-  const textContent = note.elements
-    .filter(el => el.type === 'text' && el.content)
-    .map(el => el.content)
-    .join('\n\n');
+  if (note.document?.blocks && note.document.blocks.length > 0) {
+    textContent = note.document.blocks
+      .map(block => block.content)
+      .filter(content => content && content.trim())
+      .join('\n\n');
+  } else {
+    // Fallback to legacy elements
+    textContent = (note.elements || [])
+      .filter(el => el.type === 'text' && el.content)
+      .map(el => el.content)
+      .join('\n\n');
+  }
 
   if (!textContent.trim()) {
     throw new Error('No text content found in note to generate quiz from');
