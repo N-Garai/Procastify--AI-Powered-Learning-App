@@ -312,7 +312,9 @@ export const StorageService = {
                 const snap = await getDoc(docRef);
                 if (snap.exists()) {
                     const data = snap.data();
-                    return data.canvas?.elements || [];
+                    const elems = data.canvas?.elements || [];
+                    console.log(`[STORAGE] getCanvasElements found ${elems.length} items for ${noteId}`);
+                    return elems;
                 }
             } catch (e) {
                 console.error("Error fetching canvas elements from Firestore:", e);

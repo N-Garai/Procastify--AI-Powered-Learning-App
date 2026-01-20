@@ -16,6 +16,7 @@ export class CanvasEngine {
     private shapes: Shape[] = [];
     private selectionController: SelectionController;
     private canvasId: string = "";
+    private readOnly: boolean = false;
 
     // State
     private activeTool: ToolType = "selection";
@@ -47,12 +48,13 @@ export class CanvasEngine {
     // Save debounce timer
     private saveTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
-    constructor(canvas: HTMLCanvasElement, canvasId?: string) {
+    constructor(canvas: HTMLCanvasElement, canvasId?: string, readOnly: boolean = false) {
         this.canvas = canvas;
         this.ctx = canvas.getContext("2d")!;
         this.roughCanvas = rough.canvas(canvas);
         this.selectionController = new SelectionController(this.ctx, canvas);
         this.canvasId = canvasId || LOCALSTORAGE_CANVAS_KEY;
+        this.readOnly = readOnly;
 
         this.init();
         this.setupEventListeners();
@@ -70,12 +72,16 @@ export class CanvasEngine {
         this.render();
 
         // 2. Asynchronously fetch from Firestore (source of truth) and update if different
-        this.loadFromFirestore();
+        if (!this.readOnly) {
+            this.loadFromFirestore();
+        }
     }
 
     private async loadFromFirestore() {
         try {
+            console.log(`[CANVAS] Loading from Firestore for ${this.canvasId}`);
             const elements = await StorageService.getCanvasElements(this.canvasId);
+            console.log(`[CANVAS] Loaded ${elements?.length || 0} elements`);
             if (elements && elements.length > 0) {
                 // Only update if Firestore has data (avoid overwriting local with empty)
                 this.shapes = elements as Shape[];
@@ -97,7 +103,7 @@ export class CanvasEngine {
     }
 
     private async persistToStorage() {
-        if (!this.canvasId || this.canvasId === 'undefined') return; // Don't save if no ID (read-only mode)
+        if (!this.canvasId || this.canvasId === 'undefined' || this.readOnly) return; // Don't save if no ID or read-only
 
         try {
             await StorageService.saveCanvasElements(this.canvasId, this.shapes);

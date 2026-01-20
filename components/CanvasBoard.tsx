@@ -35,7 +35,7 @@ export default function CanvasBoard({ canvasId, readOnly = false, elements }: Ca
         // Initialize Engine
         let engineInstance = engine;
         if (!engineInstance) {
-            engineInstance = new CanvasEngine(canvas, canvasId);
+            engineInstance = new CanvasEngine(canvas, canvasId, readOnly);
             setEngine(engineInstance);
         }
 

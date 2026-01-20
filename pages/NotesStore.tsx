@@ -55,7 +55,7 @@ const NotesStore: React.FC<NotesStoreProps> = ({ user, onImportNote, onNavigate 
             // Generating new ID primarily for the note itself is most important.
             // But let's just copy as-is for canvas elements unless they reference each other.
         });
-        console.log("[IMPORT] Canvas data copied");
+        console.log(`[IMPORT] Canvas data copied: ${newCanvasElements.length} elements`);
 
         const newNoteId = Date.now().toString();
 
@@ -84,6 +84,11 @@ const NotesStore: React.FC<NotesStoreProps> = ({ user, onImportNote, onNavigate 
         // Save to user storage
         // This must be the user's private storage
         await StorageService.saveNote(newNote);
+        // CRITICAL: Explicitly save canvas elements to ensure they are available for CanvasEngine immediately
+        // This bypasses any potential stripping in saveNote or legacy issues
+        if (newCanvasElements.length > 0) {
+            await StorageService.saveCanvasElements(newNote.id, newCanvasElements);
+        }
 
         console.log("[IMPORT] Import completed successfully");
 
