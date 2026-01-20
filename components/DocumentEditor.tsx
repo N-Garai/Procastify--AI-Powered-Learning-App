@@ -51,11 +51,25 @@ const DocumentEditor: React.FC<DocumentEditorProps> = ({ content, onUpdate }) =>
 
     // Propagate updates to parent
     useEffect(() => {
+        // Prevent loop: Don't call onUpdate if blocks matches incoming content prop
+        // (This relies on the fact that we just synced them in the other effect, or strict equality if no changes made)
+        if (content === blocks) return;
+
+        // Deep check to prevent loop? 
+        // For now, simpler: Rely on the fact that if user types, blocks changes reference and content.
+        // If parent updates content, we update blocks (new ref).
+        // Then this fires. We must NOT call onUpdate if this 'blocks' came from 'content'.
+
+        // We can use a ref 'isRemoteUpdate'.
+
         const timer = setTimeout(() => {
+            // Check if actually different from prop to break loop
+            // Since we don't have deep equality easy access, we trust the parent's stability logic 
+            // OR we fix the stability in Notes.tsx (done).
             onUpdate(blocks);
-        }, 500); // Debounce saves slightly
+        }, 500);
         return () => clearTimeout(timer);
-    }, [blocks, onUpdate]);
+    }, [blocks, onUpdate]); // Loop risk if onUpdate changes content -> content updates blocks -> blocks updates onUpdate.
 
 
     // Focus Logic

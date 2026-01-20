@@ -3,9 +3,6 @@ import { doc, deleteDoc, setDoc, getDoc, collection, getDocs, writeBatch, server
 import { Note } from '../types';
 
 export const FirebaseService = {
-    // --- Data Migration ---
-
-
     // --- Notes ---
     saveNote: async (userId: string, note: Note) => {
         const ref = doc(db, 'notes', note.id);
@@ -31,7 +28,10 @@ export const FirebaseService = {
             // Better: App creates `createdAt` in local state for new notes.
         }
 
-        await setDoc(ref, payload, { merge: true });
+        // Sanitize payload to remove undefined values which Firestore rejects
+        const sanitizedPayload = sanitizePayload(payload);
+
+        await setDoc(ref, sanitizedPayload, { merge: true });
     },
 
     deleteNote: async (userId: string, noteId: string) => {
@@ -49,7 +49,8 @@ export const FirebaseService = {
                 updatedAt: serverTimestamp(),
                 isPublic: note.isPublic || false
             };
-            batch.set(ref, payload, { merge: true });
+            // Sanitize batch payload as well
+            batch.set(ref, sanitizePayload(payload), { merge: true });
         });
         await batch.commit();
     },
@@ -115,4 +116,23 @@ const mapFirestoreDataToNote = (data: any): Note => {
         updatedAt: data.updatedAt?.toMillis ? data.updatedAt.toMillis() : data.updatedAt,
         publishedAt: data.publishedAt?.toMillis ? data.publishedAt.toMillis() : data.publishedAt
     } as Note;
+};
+
+// Recursively remove undefined values from an object/array
+const sanitizePayload = (obj: any): any => {
+    if (obj === null || obj === undefined) return null;
+    if (Array.isArray(obj)) {
+        return obj.map(v => sanitizePayload(v)).filter(v => v !== undefined);
+    }
+    if (typeof obj === 'object') {
+        const newObj: any = {};
+        Object.keys(obj).forEach(key => {
+            const val = sanitizePayload(obj[key]);
+            if (val !== undefined) {
+                newObj[key] = val;
+            }
+        });
+        return newObj;
+    }
+    return obj;
 };

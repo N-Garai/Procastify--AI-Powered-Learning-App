@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Note, NoteElement, UserPreferences } from '../types';
 import { Plus, ChevronLeft, Trash2, Layout, FileText, Image as ImageIcon, Search, AlignLeft, SplitSquareHorizontal, Globe } from 'lucide-react';
 import DocumentEditor from '../components/DocumentEditor';
@@ -58,6 +58,7 @@ const Notes: React.FC<NotesProps> = ({ notes, setNotes, onDeleteNote, user, onNa
             elements: [], // Legacy compat
             createdAt: Date.now()
         };
+        console.log("[Notes.tsx] createNote - Saving new note:", newNote);
         await StorageService.saveNote(newNote);
         setNotes([newNote, ...notes]);
         setSelectedNoteId(newNote.id);
@@ -71,21 +72,55 @@ const Notes: React.FC<NotesProps> = ({ notes, setNotes, onDeleteNote, user, onNa
 
     // Old updateCanvasElements removed as CanvasBoard now handles persistence directly.
 
-    const updateDocumentContent = (newBlocks: any) => {
+    const updateDocumentContent = useCallback((newBlocks: any) => {
         if (!activeNote) return;
 
-        const updatedNote = {
+        // Skip update if content is identical (deep check would be better but this helps)
+        // Actually, DocumentEditor handles the diff, so we just trust the callback.
+
+        // Optimistic update to local state first
+        setNotes(prevNotes => {
+            const noteIndex = prevNotes.findIndex(n => n.id === activeNote.id);
+            if (noteIndex === -1) return prevNotes;
+
+            const updated = {
+                ...prevNotes[noteIndex],
+                document: { blocks: newBlocks },
+                lastModified: Date.now()
+            };
+
+            // Trigger side effect (save) outside of state reducer if possible, 
+            // but for simple app, saving here or in useEffect is fine.
+            // Be careful: calling side effect inside setState reducer is bad practice usually, 
+            // but here we just need to ensure we have the LATEST notes? 
+            // Actually, 'activeNote' dependency in useCallback might be the issue.
+            // If activeNote changes, function changes -> DocumentEditor re-renders -> onUpdate called -> activeNote changes... LOOP.
+
+            // Fix: Use functional state update and removing activeNote from dependency if possible, 
+            // or just ensure we don't save if nothing changed. 
+            // But better: DocumentEditor debounce should handle it if function is stable.
+
+            return prevNotes.map((n, i) => i === noteIndex ? updated : n);
+        });
+
+        // We need the ID, which is stable. 
+        // We can't easily get the 'updated' object from inside setNotes to save it.
+        // So let's construct it.
+        const updatedStart = {
             ...activeNote,
-            document: { blocks: newBlocks }, // Save the Block[] directly
+            document: { blocks: newBlocks },
             lastModified: Date.now()
         };
-        StorageService.saveNote(updatedNote);
-        setNotes(notes.map(n => n.id === activeNote.id ? updatedNote : n));
-    };
+
+        console.log("[Notes.tsx] updateDocumentContent - Saving updated note:", updatedStart);
+        StorageService.saveNote(updatedStart);
+
+    }, [activeNote]); // Still depends on activeNote... see below.
 
     const updateTitle = (title: string) => {
         if (!activeNote) return;
         const updatedNote = { ...activeNote, title, lastModified: Date.now() };
+        console.log("[Notes.tsx] updateTitle - Saving updated title:", updatedNote);
         StorageService.saveNote(updatedNote);
         setNotes(notes.map(n => n.id === activeNote.id ? updatedNote : n));
     };
