@@ -152,113 +152,97 @@ const App: React.FC = () => {
         if (!user) return;
 
         const timestamp = Date.now();
-        const STICKY_COLORS = ['#fef3c7', '#dbeafe', '#dcfce7', '#f3e8ff'];
 
-        // Convert summary text to Tiptap JSON format
-        const summaryDocument = {
-            type: 'doc',
-            content: [
-                {
-                    type: 'heading',
-                    attrs: { level: 1 },
-                    content: [{ type: 'text', text: `Summary: ${new Date().toLocaleDateString()}` }]
-                },
-                {
-                    type: 'paragraph',
-                    content: [{ type: 'text', text: summary.summaryText }]
-                }
-            ]
-        };
+        // --- Generate Blocks for Document Section ---
+        const newBlocks: any[] = []; // Use any to match Block[] structure without importing strict type locally if not needed, but we essentially conform to Block interface
 
-        const flashcardElements: NoteElement[] = flashcards.map((fc, i) => ({
-            id: `${timestamp}-fc-${i}`,
-            type: 'sticky',
-            x: 600 + (i % 2) * 260, // Shift flashcards to right
-            y: 50 + Math.floor(i / 2) * 260,
-            width: 240,
-            height: 240,
-            content: `${fc.front}\n\n---\n${fc.back}`,
-            zIndex: 10 + i,
-            color: STICKY_COLORS[i % STICKY_COLORS.length]
-        }));
+        // 1. Summary Header
+        newBlocks.push({
+            id: `${timestamp}-h1`,
+            type: 'h1',
+            content: `Summary: ${new Date().toLocaleDateString()}`
+        });
 
-        // Add Main Summary Text to Canvas
-        const summaryElement: NoteElement = {
-            id: `${timestamp}-summary`,
+        // 2. Summary Text
+        // Convert newlines to breaks for HTML rendering in Block editor
+        const formattedSummary = summary.summaryText.replace(/\n/g, '<br />');
+        newBlocks.push({
+            id: `${timestamp}-text`,
             type: 'text',
-            x: 50,
-            y: 50,
-            width: 500,
-            height: 600, // Approximate
-            content: `**Summary**\n\n${summary.summaryText}`,
-            zIndex: 5,
-            fontSize: 'medium'
-        };
+            content: formattedSummary
+        });
 
-        const initialCanvasElements = [summaryElement, ...flashcardElements];
+        // 3. Flashcards Section
+        if (flashcards.length > 0) {
+            newBlocks.push({
+                id: `${timestamp}-fc-h2`,
+                type: 'h2',
+                content: "Flashcards (Key Learning Concepts)"
+            });
+
+            flashcards.forEach((fc, i) => {
+                newBlocks.push({
+                    id: `${timestamp}-fc-${i}-q`,
+                    type: 'h3',
+                    content: fc.front
+                });
+                newBlocks.push({
+                    id: `${timestamp}-fc-${i}-a`,
+                    type: 'text',
+                    content: fc.back
+                });
+                // Add a small spacer/separator if needed, or just let them flow
+                newBlocks.push({
+                    id: `${timestamp}-fc-${i}-d`,
+                    type: 'text',
+                    content: ''
+                });
+            });
+        }
 
         let updatedNotes = [...notes];
         let noteWasCreated = false;
         let noteToSave: Note | null = null;
 
         if (noteId === null) {
+            // --- Create New Note ---
             const newNote: Note = {
                 id: timestamp.toString(),
                 userId: user.id,
                 title: `Summary: ${new Date().toLocaleDateString()}`,
-                document: { blocks: summaryDocument.content }, // Init document section
-                canvas: { elements: initialCanvasElements }, // Init canvas section
-                elements: initialCanvasElements, // Backward compatibility
+                document: { blocks: newBlocks },
+                canvas: { elements: [] }, // Empty canvas as requested (focus on Document)
+                elements: [], // Legacy
                 tags: [],
                 folder: 'Summaries',
-                lastModified: timestamp
+                lastModified: timestamp,
+                createdAt: timestamp
             };
             updatedNotes = [newNote, ...updatedNotes];
             noteToSave = newNote;
             noteWasCreated = true;
         } else {
+            // --- Update Existing Note ---
             updatedNotes = updatedNotes.map(n => {
                 if (n.id === noteId) {
-                    // Append to document if exists, or create
                     const existingBlocks = n.document?.blocks || [];
-                    // Add a separator
-                    const newBlocks = [
+
+                    // Add visual separator block before appending new content
+                    const separatorBlock = {
+                        id: `${timestamp}-sep`,
+                        type: 'text',
+                        content: '<br/>---<br/>'
+                    };
+
+                    const updatedBlocks = [
                         ...existingBlocks,
-                        { type: 'horizontalRule' },
-                        ...summaryDocument.content
+                        separatorBlock,
+                        ...newBlocks
                     ];
-
-                    // Add flashcards to canvas
-                    // Add flashcards to canvas (and summary text)
-                    const maxY = (n.canvas?.elements || n.elements).reduce((max, el) => Math.max(max, el.y + el.height), 0);
-                    const offsetY = maxY > 0 ? maxY + 100 : 50;
-
-                    const newSummaryEl = { ...summaryElement, y: offsetY, id: `${timestamp}-summary-append` };
-
-                    const newCanvasElements = flashcardElements.map((el, i) => ({
-                        ...el,
-                        zIndex: (n.canvas?.elements || n.elements).length + 10 + i,
-                        y: el.y + offsetY - 50 // Reset y relative to offset, adjust logic if needed. 
-                        // Actually flashcards were absolute y=50... need to shift them down by offsetY
-                    })).map(el => ({ ...el, y: el.y + offsetY - 50 }));
-                    // Wait, original flashcards y starts at 50. So offsetY + (el.y - 50) is better.
-                    // Correct layout: Summary at left, Flashcards at right.
-
-                    // Let's simplfy: Just append them all relative to offsetY
-                    const shiftedSummary = { ...summaryElement, y: offsetY, id: `${timestamp}-sum-${Date.now()}` };
-                    const shiftedCards = flashcardElements.map(el => ({
-                        ...el,
-                        y: el.y + offsetY - 50, // Shift down
-                        id: `${timestamp}-fc-${el.id}` // ensure unique
-                    }));
-
-                    const allNewElements = [shiftedSummary, ...shiftedCards];
 
                     const updated = {
                         ...n,
-                        document: { blocks: newBlocks },
-                        canvas: { elements: [...(n.canvas?.elements || []), ...allNewElements] },
-                        elements: [...n.elements, ...allNewElements], // Backward compatibility
+                        document: { blocks: updatedBlocks },
                         lastModified: timestamp
                     };
                     noteToSave = updated;
@@ -269,6 +253,7 @@ const App: React.FC = () => {
         }
 
         setNotes(updatedNotes);
+
         if (noteToSave) {
             await StorageService.saveNote(noteToSave);
         }
@@ -278,10 +263,9 @@ const App: React.FC = () => {
                 ...s,
                 notesCreated: (s.notesCreated || 0) + 1
             }));
+            const updatedStats = await StorageService.getStats();
+            setStats(updatedStats);
         }
-
-        const updatedStats = await StorageService.getStats();
-        setStats(updatedStats);
     };
 
 
