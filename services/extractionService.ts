@@ -54,7 +54,7 @@ export const extractPDFText = async (pdfBase64: string): Promise<ExtractionResul
 
     // Clean up the text
     const cleanedText = fullText
-      .replace(/\s+/g, ' ')  // Replace multiple spaces with single space
+      .replace(/[ \t]+/g, ' ')  // Replace multiple spaces/tabs with single space, preserve newlines
       .replace(/\n\s*\n/g, '\n\n')  // Clean up multiple newlines
       .trim();
 
