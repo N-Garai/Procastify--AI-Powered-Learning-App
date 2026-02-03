@@ -1,4 +1,8 @@
 import { Attachment } from '../types';
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Configure PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
 
 export interface ExtractionResult {
   text: string;
@@ -13,6 +17,64 @@ interface NormalizeRef {
   errors: string[];
 }
 
+/**
+ * Extract text from a PDF file using PDF.js
+ */
+export const extractPDFText = async (pdfBase64: string): Promise<ExtractionResult> => {
+  try {
+    // Convert base64 to array buffer
+    const binaryString = atob(pdfBase64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+
+    // Load the PDF document
+    const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+    let fullText = '';
+
+    // Extract text from each page
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      const page = await pdf.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      
+      // Combine text items from the page
+      const pageText = textContent.items
+        .map((item: any) => item.str)
+        .join(' ');
+      
+      fullText += pageText + '\n\n';
+    }
+
+    // Clean up the text
+    const cleanedText = fullText
+      .replace(/\s+/g, ' ')  // Replace multiple spaces with single space
+      .replace(/\n\s*\n/g, '\n\n')  // Clean up multiple newlines
+      .trim();
+
+    if (!cleanedText) {
+      return {
+        text: '',
+        success: false,
+        error: 'No readable text found in PDF'
+      };
+    }
+
+    return {
+      text: cleanedText,
+      success: true
+    };
+
+  } catch (error) {
+    console.error('PDF text extraction failed:', error);
+    return {
+      text: '',
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error during PDF extraction'
+    };
+  }
+};
+
 export const prepareTextForSummarization = async (
   userText: string,
   attachments: Attachment[]
@@ -21,52 +83,77 @@ export const prepareTextForSummarization = async (
   // If no context at all
   if (!userText && attachments.length === 0) return null;
 
-  try {
-    const response = await fetch(`${BACKEND_URL}/normalize`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        user_text: userText,
-        attachments: attachments.map(a => ({
-          type: a.type,
-          content: a.content,
-          name: a.name,
-          mimeType: a.mimeType
-        }))
-      })
-    });
+  let combinedText = userText || '';
+  const failedExtractions: string[] = [];
 
-    if (!response.ok) {
-      throw new Error(`Backend Error ${response.status}`);
+  // First, handle PDF attachments locally using our PDF.js extraction
+  const pdfAttachments = attachments.filter(a => a.type === 'pdf');
+  const nonPdfAttachments = attachments.filter(a => a.type !== 'pdf');
+
+  // Extract text from PDF files locally
+  for (const pdfAttachment of pdfAttachments) {
+    try {
+      const result = await extractPDFText(pdfAttachment.content);
+      if (result.success && result.text) {
+        combinedText += `\n\n--- Content from ${pdfAttachment.name || 'PDF file'} ---\n${result.text}`;
+      } else {
+        console.warn(`Failed to extract text from PDF: ${result.error}`);
+        failedExtractions.push(pdfAttachment.name || 'PDF file');
+      }
+    } catch (error) {
+      console.error('PDF extraction error:', error);
+      failedExtractions.push(pdfAttachment.name || 'PDF file');
     }
+  }
 
-    const data = await response.json();
+  // Handle non-PDF attachments through backend (if needed)
+  if (nonPdfAttachments.length > 0) {
+    try {
+      const response = await fetch(`${BACKEND_URL}/normalize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_text: '', // We'll merge manually
+          attachments: nonPdfAttachments.map(a => ({
+            type: a.type,
+            content: a.content,
+            name: a.name,
+            mimeType: a.mimeType
+          }))
+        })
+      });
 
-    if (data.status === 'error') {
-      throw new Error('Backend failed: ' + data.failed_attachments.join(', '));
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === 'success' && data.normalized_text) {
+          combinedText += `\n\n--- Content from other attachments ---\n${data.normalized_text}`;
+        } else {
+          // If backend failed, add failed attachments to our list
+          if (data.failed_attachments) {
+            failedExtractions.push(...data.failed_attachments);
+          } else {
+            failedExtractions.push(...nonPdfAttachments.map(a => a.name || a.type));
+          }
+        }
+      } else {
+        console.warn('Backend not available for non-PDF attachments');
+        failedExtractions.push(...nonPdfAttachments.map(a => a.name || a.type));
+      }
+    } catch (error) {
+      console.warn('Backend not available for non-PDF attachments:', error);
+      failedExtractions.push(...nonPdfAttachments.map(a => a.name || a.type));
     }
+  }
 
-    const finalText = data.normalized_text;
-    console.log("Final text:", finalText);
-
-    // Final fallback if backend returns empty but user typed something
-    if (!finalText && userText) {
-      return { combinedText: userText, failedExtractions: ["Backend returned no text, using local input."] };
-    }
-
-    return {
-      combinedText: finalText,
-      failedExtractions: data.failed_attachments || []
-    };
-
-  } catch (error) {
-    console.error("Normalization failed:", error);
-    // Fallback: Just use user text if available
-    if (userText) {
-      return { combinedText: userText, failedExtractions: ["Backend unavailable"] };
-    }
+  // Final fallback if no text was extracted
+  if (!combinedText.trim()) {
     return null;
   }
+
+  return {
+    combinedText: combinedText.trim(),
+    failedExtractions
+  };
 };
 
 // --- Legacy Single Extractors (Optional / Deprecated) ---

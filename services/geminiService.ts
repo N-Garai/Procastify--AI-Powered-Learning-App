@@ -60,27 +60,20 @@ export const summarizeContent = async (
 ): Promise<string> => {
   const ai = getAI();
 
-  // 1. Normalize Multimodal Inputs via Backend
-  let finalContent = textContext;
-
-  // Even if only textContext exists, we might want to run it through normalization if we had backend cleaning? 
-  // But for now, existing logic used textContext directly. 
-  // The prompt implies we MUST use the pipeline for "ALL" inputs.
-  // So:
+  // 1. Normalize and extract content from all inputs
   const preparation = await prepareTextForSummarization(textContext, attachments);
 
   if (!preparation) {
     return "Please enter text or add valid attachments to summarize.";
   }
 
-  finalContent = preparation.combinedText;
+  const finalContent = preparation.combinedText;
 
-  // Warn if some failed? We could return a complex object, but signature returns string.
-  // Ideally, valid text processes, errors are logged.
+  // Inform user about any failed extractions
+  let warningText = "";
   if (preparation.failedExtractions.length > 0) {
-    console.warn("Some attachments failed:", preparation.failedExtractions);
-    // Optional: Append warning to user
-    // finalContent += `\n\n[System Warning: Some inputs could not be processed: ${preparation.failedExtractions.join(', ')}]`;
+    console.warn("Some attachments failed to process:", preparation.failedExtractions);
+    warningText = `\n\n⚠️ Note: Some files could not be processed (${preparation.failedExtractions.join(', ')}). The summary includes only successfully processed content.`;
   }
 
   let systemPrompt = "";
@@ -106,18 +99,18 @@ export const summarizeContent = async (
     });
 
     if (!response || !response.text) {
-      return "Failed to generate summary. Please try again.";
+      return "Failed to generate summary. Please try again." + warningText;
     }
 
-    return response.text;
+    return response.text + warningText;
   } catch (error: any) {
     console.error("Summary error:", error);
 
     if (error.status === 'RESOURCE_EXHAUSTED' || error.code === 429) {
-      return "Rate limited. Please try again in a moment.";
+      return "Rate limited. Please try again in a moment." + warningText;
     }
 
-    return `Error: ${error.message || "Unknown error"}. Please try again.`;
+    return `Error: ${error.message || "Unknown error"}. Please try again.` + warningText;
   }
 };
 
