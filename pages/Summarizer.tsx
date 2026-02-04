@@ -69,7 +69,7 @@ const Summarizer: React.FC<SummarizerProps> = ({ onSave, notes, onAddToNote }) =
                 userId: StorageService.currentUserId || '',
                 name: customModeText.trim(),
                 systemPrompt: customModePrompt.trim(),
-                createdAt: Date.now()
+                createdAt: editingCustomMode?.createdAt || Date.now()
             };
 
             await StorageService.saveCustomMode(newMode);
