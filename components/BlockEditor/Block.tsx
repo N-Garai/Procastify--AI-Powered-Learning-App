@@ -156,14 +156,20 @@ const BlockComponent: React.FC<BlockProps> = ({
 
     e.preventDefault();
     onEnter(block.id, e);
+} else if (e.key === 'Backspace') {
+    const el = contentRef.current;
+
+    // Delete block if it's empty (works for ALL block types)
+    if (
+        el &&
+        el.innerText.length === 0 &&
+        (!block.content || block.content === '')
+    ) {
+        e.preventDefault();
+        deleteBlock(block.id);
+    }
 }
- else if (e.key === 'Backspace') {
-            // Logic to merge or delete block if empty
-            if (contentRef.current && contentRef.current.innerText.length === 0 && block.content === '') {
-                e.preventDefault();
-                deleteBlock(block.id);
-            }
-        } else if (e.key === 'ArrowUp') {
+ else if (e.key === 'ArrowUp') {
     const selection = window.getSelection();
     if (!selection || selection.anchorOffset !== 0) return;
 
