@@ -28,6 +28,7 @@ import Focus from "./pages/Focus";
 import QuizPage from "./pages/Quiz";
 import NoteFeed from "./pages/NoteFeed";
 import NotesStore from "./pages/NotesStore";
+import Folders from "./pages/Folders";
 import { AlertCircle, LogIn, X, Loader2 } from "lucide-react";
 
 const App: React.FC = () => {
@@ -36,6 +37,7 @@ const App: React.FC = () => {
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [summaries, setSummaries] = useState<Summary[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [focusTask, setFocusTask] = useState<RoutineTask | undefined>(
     undefined,
@@ -47,9 +49,10 @@ const App: React.FC = () => {
   const [authError, setAuthError] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  // NEW: Folder state
-  const [folders, setFolders] = useState<Folder[]>([]);
-  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  // Folder filtering state
+  const [activeFolderId, setActiveFolderId] = useState<
+    string | null | undefined
+  >(undefined);
 
   const deriveName = (email?: string | null) => {
     if (!email) return "User";
@@ -102,11 +105,11 @@ const App: React.FC = () => {
       const n = await StorageService.getNotes();
       const s = await StorageService.getSummaries();
       const st = await StorageService.getStats();
-      const f = await StorageService.getFolders(); // NEW: Load folders
+      const f = await StorageService.getFolders();
       setNotes(n);
       setSummaries(s);
       setStats(st);
-      setFolders(f); // NEW: Set folders state
+      setFolders(f);
     } catch (error) {
       console.error("Error loading user data:", error);
     }
@@ -149,56 +152,6 @@ const App: React.FC = () => {
     }
   };
 
-  // ========================================
-  // NEW: Folder Management Handlers
-  // ========================================
-
-  const handleCreateFolder = async (name: string, color?: string) => {
-    if (!user) return;
-
-    const newFolder: Folder = {
-      id: Date.now().toString(),
-      userId: user.id,
-      name,
-      color: color || "#5865F2",
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
-    await StorageService.createFolder(newFolder);
-    setFolders([...folders, newFolder]);
-  };
-
-  const handleUpdateFolder = async (
-    folderId: string,
-    updates: Partial<Folder>,
-  ) => {
-    if (!user) return;
-
-    await StorageService.updateFolder(folderId, updates);
-    setFolders(
-      folders.map((f) =>
-        f.id === folderId ? { ...f, ...updates, updatedAt: Date.now() } : f,
-      ),
-    );
-  };
-
-  const handleDeleteFolder = async (folderId: string) => {
-    if (!user) return;
-
-    await StorageService.deleteFolder(folderId);
-    setFolders(folders.filter((f) => f.id !== folderId));
-
-    // Clear selection if deleted folder was selected
-    if (selectedFolderId === folderId) {
-      setSelectedFolderId(null);
-    }
-
-    // Refresh notes to show updated folder assignments
-    const updatedNotes = await StorageService.getNotes();
-    setNotes(updatedNotes);
-  };
-
   const handleStartFocus = (task?: RoutineTask) => {
     setFocusTask(task);
     setView("focus");
@@ -212,6 +165,15 @@ const App: React.FC = () => {
     setView("routine");
   };
 
+  const handleNavigate = (newView: ViewState, folderId?: string | null) => {
+    if (newView === "notes") {
+      setActiveFolderId(folderId);
+    } else {
+      setActiveFolderId(undefined);
+    }
+    setView(newView);
+  };
+
   const handleAddToNote = async (
     noteId: string | null,
     summary: Summary,
@@ -221,18 +183,14 @@ const App: React.FC = () => {
 
     const timestamp = Date.now();
 
-    // --- Generate Blocks for Document Section ---
-    const newBlocks: any[] = []; // Use any to match Block[] structure without importing strict type locally if not needed, but we essentially conform to Block interface
+    const newBlocks: any[] = [];
 
-    // 1. Summary Header
     newBlocks.push({
       id: `${timestamp}-h1`,
       type: "h1",
       content: `Summary: ${new Date().toLocaleDateString()}`,
     });
 
-    // 2. Summary Text
-    // Convert newlines to breaks for HTML rendering in Block editor
     const formattedSummary = summary.summaryText.replace(/\n/g, "<br />");
     newBlocks.push({
       id: `${timestamp}-text`,
@@ -240,7 +198,6 @@ const App: React.FC = () => {
       content: formattedSummary,
     });
 
-    // 3. Flashcards Section
     if (flashcards.length > 0) {
       newBlocks.push({
         id: `${timestamp}-fc-h2`,
@@ -259,7 +216,6 @@ const App: React.FC = () => {
           type: "text",
           content: fc.back,
         });
-        // Add a small spacer/separator if needed, or just let them flow
         newBlocks.push({
           id: `${timestamp}-fc-${i}-d`,
           type: "text",
@@ -273,17 +229,16 @@ const App: React.FC = () => {
     let noteToSave: Note | null = null;
 
     if (noteId === null) {
-      // --- Create New Note ---
       const newNote: Note = {
         id: timestamp.toString(),
         userId: user.id,
         title: `Summary: ${new Date().toLocaleDateString()}`,
         document: { blocks: newBlocks },
-        canvas: { elements: [] }, // Empty canvas as requested (focus on Document)
-        elements: [], // Legacy
+        canvas: { elements: [] },
+        elements: [],
         tags: [],
         folder: "Summaries",
-        folderId: selectedFolderId || undefined, // NEW: Assign to current folder if one is selected
+        folderId: null,
         lastModified: timestamp,
         createdAt: timestamp,
       };
@@ -291,12 +246,10 @@ const App: React.FC = () => {
       noteToSave = newNote;
       noteWasCreated = true;
     } else {
-      // --- Update Existing Note ---
       updatedNotes = updatedNotes.map((n) => {
         if (n.id === noteId) {
           const existingBlocks = n.document?.blocks || [];
 
-          // Add visual separator block before appending new content
           const separatorBlock = {
             id: `${timestamp}-sep`,
             type: "text",
@@ -423,17 +376,10 @@ const App: React.FC = () => {
     <div className="flex min-h-screen bg-[#1e1f22]">
       <Sidebar
         currentView={view}
-        onNavigate={setView}
+        onNavigate={handleNavigate}
         onLogout={handleLogout}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        // NEW: Folder props
-        folders={folders}
-        selectedFolderId={selectedFolderId}
-        onSelectFolder={setSelectedFolderId}
-        onCreateFolder={handleCreateFolder}
-        onUpdateFolder={handleUpdateFolder}
-        onDeleteFolder={handleDeleteFolder}
       />
       <main
         className={`flex-1 ${sidebarCollapsed ? "ml-20" : "ml-64"} overflow-y-auto max-h-screen relative transition-all duration-300 ease-in-out`}
@@ -484,17 +430,24 @@ const App: React.FC = () => {
               StorageService.saveNotes(newNotes);
             }}
             onDeleteNote={async (noteId) => {
-              // strictly handle the flow: Service(Firestore/Storage) -> Local State
               await StorageService.deleteNote(noteId);
               setNotes((prev) => prev.filter((n) => n.id !== noteId));
               console.log("[DELETE] Removed from local React state:", noteId);
             }}
             user={user}
-            onNavigate={setView}
-            // NEW: Folder props
+            onNavigate={handleNavigate}
+            activeFolderId={activeFolderId}
             folders={folders}
-            selectedFolderId={selectedFolderId}
-            onSelectFolder={setSelectedFolderId}
+          />
+        )}
+
+        {view === "folders" && (
+          <Folders
+            folders={folders}
+            setFolders={setFolders}
+            notes={notes}
+            user={user}
+            onNavigate={handleNavigate}
           />
         )}
 
@@ -536,10 +489,10 @@ const App: React.FC = () => {
             user={user}
             onImportNote={(newNote) => {
               setNotes([newNote, ...notes]);
-              StorageService.saveNote(newNote); // Ensure persistence immediately
+              StorageService.saveNote(newNote);
               setView("notes");
             }}
-            onNavigate={setView}
+            onNavigate={handleNavigate}
           />
         )}
       </main>

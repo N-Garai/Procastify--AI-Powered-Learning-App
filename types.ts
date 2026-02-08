@@ -8,7 +8,8 @@ export type ViewState =
   | "focus"
   | "quiz"
   | "feed"
-  | "store";
+  | "store"
+  | "folders"; // New view for folder management
 
 export interface UserPreferences {
   id: string;
@@ -30,18 +31,6 @@ export interface UserStats {
   lastLoginDate: string;
   dailyActivity: Record<string, number>;
   highScore: number;
-}
-
-// NEW: Folder interface for organizing notes
-export interface Folder {
-  id: string;
-  userId: string;
-  name: string;
-  color?: string; // Optional color for visual distinction
-  icon?: string; // Optional emoji or icon
-  createdAt: number;
-  updatedAt: number;
-  parentId?: string; // For nested folders (future enhancement)
 }
 
 export type NoteElementType =
@@ -102,6 +91,17 @@ export interface NoteCanvas {
   strokes?: any[]; // For future drawing support
 }
 
+// New Folder interface
+export interface Folder {
+  id: string;
+  userId: string;
+  name: string;
+  color?: string; // Optional color for visual distinction
+  createdAt: number;
+  updatedAt: number;
+  noteCount?: number; // Computed field, not stored
+}
+
 export interface Note {
   id: string;
   userId: string;
@@ -116,8 +116,8 @@ export interface Note {
   elements?: NoteElement[];
 
   tags: string[];
-  folder: string; // Now references Folder.id instead of just a string
-  folderId?: string; // NEW: Explicit folder reference (folder field kept for backward compatibility)
+  folder: string; // Now references folder name (backward compatible)
+  folderId?: string | null; // New: References Folder.id
   lastModified: number;
 
   // Persistence

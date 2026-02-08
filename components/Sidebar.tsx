@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { ViewState, Folder } from "../types";
+import React from "react";
+import { ViewState } from "../types";
 import {
   LayoutDashboard,
   FileText,
@@ -12,14 +12,7 @@ import {
   Globe,
   PanelLeftClose,
   PanelLeftOpen,
-  FolderPlus,
-  Folder as FolderIcon,
-  ChevronRight,
-  ChevronDown,
-  Edit2,
-  Trash2,
-  Check,
-  X,
+  FolderOpen,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -28,13 +21,6 @@ interface SidebarProps {
   onLogout: () => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
-  // Folder management props
-  folders?: Folder[];
-  selectedFolderId?: string | null;
-  onSelectFolder?: (folderId: string | null) => void;
-  onCreateFolder?: (name: string, color?: string) => void;
-  onUpdateFolder?: (folderId: string, updates: Partial<Folder>) => void;
-  onDeleteFolder?: (folderId: string) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -43,28 +29,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onLogout,
   collapsed,
   onToggleCollapse,
-  folders = [],
-  selectedFolderId,
-  onSelectFolder,
-  onCreateFolder,
-  onUpdateFolder,
-  onDeleteFolder,
 }) => {
-  const [showFolders, setShowFolders] = useState(true);
-  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
-  const [newFolderName, setNewFolderName] = useState("");
-  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState("");
-
-  const FOLDER_COLORS = [
-    "#5865F2", // Discord Blue
-    "#57F287", // Green
-    "#FEE75C", // Yellow
-    "#EB459E", // Pink
-    "#ED4245", // Red
-    "#F26522", // Orange
-  ];
-
   const NavItem = ({
     view,
     icon: Icon,
@@ -109,34 +74,6 @@ const Sidebar: React.FC<SidebarProps> = ({
         )}
       </button>
     );
-  };
-
-  const handleCreateFolder = () => {
-    if (newFolderName.trim() && onCreateFolder) {
-      const randomColor =
-        FOLDER_COLORS[Math.floor(Math.random() * FOLDER_COLORS.length)];
-      onCreateFolder(newFolderName.trim(), randomColor);
-      setNewFolderName("");
-      setIsCreatingFolder(false);
-    }
-  };
-
-  const handleUpdateFolder = (folderId: string) => {
-    if (editingName.trim() && onUpdateFolder) {
-      onUpdateFolder(folderId, { name: editingName.trim() });
-      setEditingFolderId(null);
-      setEditingName("");
-    }
-  };
-
-  const handleDeleteFolder = (folderId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (
-      onDeleteFolder &&
-      confirm('Delete this folder? Notes will be moved to "General".')
-    ) {
-      onDeleteFolder(folderId);
-    }
   };
 
   return (
@@ -198,170 +135,11 @@ const Sidebar: React.FC<SidebarProps> = ({
       )}
 
       {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 flex flex-col gap-1 overflow-y-auto no-scrollbar">
+      <nav className="flex-1 px-3 py-4 flex flex-col justify-evenly gap-1 overflow-y-auto no-scrollbar">
         <NavItem view="dashboard" icon={LayoutDashboard} label="Dashboard" />
         <NavItem view="summarizer" icon={FileText} label="Summarizer" />
-        <NavItem view="notes" icon={BookOpen} label="My Notes" />
-
-        {/* Folders Section - Only show when not collapsed and on notes view */}
-        {!collapsed && currentView === "notes" && onSelectFolder && (
-          <div className="mt-2 mb-2">
-            <div className="flex items-center justify-between px-2 py-2">
-              <button
-                onClick={() => setShowFolders(!showFolders)}
-                className="flex items-center gap-2 text-discord-textMuted hover:text-white transition-colors text-sm font-semibold"
-              >
-                {showFolders ? (
-                  <ChevronDown size={16} />
-                ) : (
-                  <ChevronRight size={16} />
-                )}
-                <FolderIcon size={16} />
-                <span>Folders</span>
-              </button>
-              <button
-                onClick={() => setIsCreatingFolder(true)}
-                className="p-1 text-discord-textMuted hover:text-white hover:bg-discord-hover rounded transition-all"
-                title="Create folder"
-              >
-                <FolderPlus size={16} />
-              </button>
-            </div>
-
-            {showFolders && (
-              <div className="space-y-1 ml-2">
-                {/* All Notes */}
-                <button
-                  onClick={() => onSelectFolder(null)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-all text-sm ${
-                    selectedFolderId === null
-                      ? "bg-discord-panel text-white"
-                      : "text-discord-textMuted hover:bg-discord-hover hover:text-white"
-                  }`}
-                >
-                  <BookOpen size={14} />
-                  <span>All Notes</span>
-                </button>
-
-                {/* Folder List */}
-                {folders.map((folder) => (
-                  <div key={folder.id} className="relative group">
-                    {editingFolderId === folder.id ? (
-                      <div className="flex items-center gap-1 px-2 py-1">
-                        <div
-                          className="w-3 h-3 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: folder.color || "#5865F2" }}
-                        />
-                        <input
-                          type="text"
-                          value={editingName}
-                          onChange={(e) => setEditingName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter")
-                              handleUpdateFolder(folder.id);
-                            if (e.key === "Escape") setEditingFolderId(null);
-                          }}
-                          className="flex-1 bg-discord-panel border border-discord-accent rounded px-2 py-1 text-xs text-white focus:outline-none"
-                          autoFocus
-                        />
-                        <button
-                          onClick={() => handleUpdateFolder(folder.id)}
-                          className="p-1 hover:bg-green-500/20 rounded text-green-400"
-                        >
-                          <Check size={12} />
-                        </button>
-                        <button
-                          onClick={() => setEditingFolderId(null)}
-                          className="p-1 hover:bg-red-500/20 rounded text-red-400"
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="relative">
-                        <div
-                          onClick={() => onSelectFolder(folder.id)}
-                          className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-all text-sm cursor-pointer ${
-                            selectedFolderId === folder.id
-                              ? "bg-discord-panel text-white"
-                              : "text-discord-textMuted hover:bg-discord-hover hover:text-white"
-                          }`}
-                        >
-                          <div
-                            className="w-3 h-3 rounded-full flex-shrink-0"
-                            style={{
-                              backgroundColor: folder.color || "#5865F2",
-                            }}
-                          />
-                          <span className="flex-1 text-left truncate">
-                            {folder.name}
-                          </span>
-                        </div>
-                        {/* Action buttons - separate from folder button */}
-                        <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 flex gap-1 pointer-events-none group-hover:pointer-events-auto">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingFolderId(folder.id);
-                              setEditingName(folder.name);
-                            }}
-                            className="p-1 hover:bg-discord-accent/20 rounded z-10"
-                          >
-                            <Edit2 size={12} />
-                          </button>
-                          <button
-                            onClick={(e) => handleDeleteFolder(folder.id, e)}
-                            className="p-1 hover:bg-red-500/20 rounded text-red-400 z-10"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-
-                {/* New Folder Input */}
-                {isCreatingFolder && (
-                  <div className="flex items-center gap-1 px-2 py-1">
-                    <FolderIcon size={14} className="text-discord-textMuted" />
-                    <input
-                      type="text"
-                      value={newFolderName}
-                      onChange={(e) => setNewFolderName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleCreateFolder();
-                        if (e.key === "Escape") {
-                          setIsCreatingFolder(false);
-                          setNewFolderName("");
-                        }
-                      }}
-                      placeholder="Folder name..."
-                      className="flex-1 bg-discord-panel border border-discord-accent rounded px-2 py-1 text-xs text-white placeholder-discord-textMuted focus:outline-none"
-                      autoFocus
-                    />
-                    <button
-                      onClick={handleCreateFolder}
-                      className="p-1 hover:bg-green-500/20 rounded text-green-400"
-                    >
-                      <Check size={12} />
-                    </button>
-                    <button
-                      onClick={() => {
-                        setIsCreatingFolder(false);
-                        setNewFolderName("");
-                      }}
-                      className="p-1 hover:bg-red-500/20 rounded text-red-400"
-                    >
-                      <X size={12} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
+        <NavItem view="notes" icon={BookOpen} label="All Notes" />
+        <NavItem view="folders" icon={FolderOpen} label="Folders" />
         <NavItem view="feed" icon={Flame} label="Learning Feed" />
         <NavItem view="quiz" icon={Gamepad2} label="Quiz Arena" />
         <NavItem view="routine" icon={Clock} label="Routine" />

@@ -11,6 +11,7 @@ import {
   query,
   where,
   orderBy,
+  Firestore,
 } from "firebase/firestore";
 import { Note, Folder } from "../types";
 
@@ -19,17 +20,30 @@ export const FirebaseService = {
   saveNote: async (userId: string, note: Note) => {
     const ref = doc(db, "notes", note.id);
 
+    // Ensure strictly managed fields
     const payload = {
       ...note,
       ownerId: userId,
       updatedAt: serverTimestamp(),
+      // Ensure these defaults if missing
       isPublic: note.isPublic || false,
       publishedAt: note.isPublic ? note.publishedAt || serverTimestamp() : null,
       document: note.document || { blocks: [] },
       canvas: note.canvas || { elements: [], strokes: [] },
     };
 
+    // If it's a new note (basic check), add createdAt.
+    // Ideally we pass this in, but 'merge: true' with setDoc handles it well if we don't overwrite.
+    // But to be safe for existing notes being saved:
+    if (!note.createdAt) {
+      // We can't easily know if it exists without reading, but 'merge' is safe.
+      // We simply won't set createdAt here if it's missing in the object, assume it allows serverTimestamp if new?
+      // Better: App creates `createdAt` in local state for new notes.
+    }
+
+    // Sanitize payload to remove undefined values which Firestore rejects
     const sanitizedPayload = sanitizePayload(payload);
+
     await setDoc(ref, sanitizedPayload, { merge: true });
   },
 
@@ -48,6 +62,7 @@ export const FirebaseService = {
         updatedAt: serverTimestamp(),
         isPublic: note.isPublic || false,
       };
+      // Sanitize batch payload as well
       batch.set(ref, sanitizePayload(payload), { merge: true });
     });
     await batch.commit();
@@ -55,6 +70,7 @@ export const FirebaseService = {
 
   // --- Public Store ---
   publishNote: async (userId: string, note: Note) => {
+    // Single source of truth update
     const ref = doc(db, "notes", note.id);
     await setDoc(
       ref,
@@ -88,63 +104,34 @@ export const FirebaseService = {
         orderBy("publishedAt", "desc"),
       );
       const snap = await getDocs(q);
-      return snap.docs.map((d) => mapFirestoreDataToNote(d.data()));
+      return snap.docs.map((d) => {
+        const data = d.data();
+        // Normalize timestamps
+        return mapFirestoreDataToNote(data);
+      });
     } catch (e) {
       console.error("Error fetching public notes:", e);
       return [];
     }
   },
 
-  // --- FOLDERS (NEW) ---
-
-  /**
-   * Create a new folder
-   */
-  createFolder: async (userId: string, folder: Folder) => {
+  // --- Folders ---
+  saveFolder: async (userId: string, folder: Folder) => {
     const ref = doc(db, "folders", folder.id);
     const payload = {
       ...folder,
       userId,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    };
-    await setDoc(ref, sanitizePayload(payload));
-  },
-
-  /**
-   * Update an existing folder
-   */
-  updateFolder: async (
-    userId: string,
-    folderId: string,
-    updates: Partial<Folder>,
-  ) => {
-    const ref = doc(db, "folders", folderId);
-    const payload = {
-      ...updates,
       updatedAt: serverTimestamp(),
     };
     await setDoc(ref, sanitizePayload(payload), { merge: true });
   },
 
-  /**
-   * Delete a folder
-   * Note: This does NOT delete notes in the folder - they should be moved to "General" first
-   */
-  deleteFolder: async (userId: string, folderId: string) => {
-    const ref = doc(db, "folders", folderId);
-    await deleteDoc(ref);
-  },
-
-  /**
-   * Get all folders for a user
-   */
   getFolders: async (userId: string): Promise<Folder[]> => {
     try {
       const q = query(
         collection(db, "folders"),
         where("userId", "==", userId),
-        orderBy("createdAt", "asc"),
+        orderBy("createdAt", "desc"),
       );
       const snap = await getDocs(q);
       return snap.docs.map((d) => {
@@ -165,41 +152,23 @@ export const FirebaseService = {
     }
   },
 
-  /**
-   * Move all notes from one folder to another (used when deleting folders)
-   */
-  moveNotesToFolder: async (
-    userId: string,
-    fromFolderId: string,
-    toFolderId: string | null,
-  ) => {
-    try {
-      // Get all notes in the source folder
-      const notesQuery = query(
-        collection(db, "notes"),
-        where("ownerId", "==", userId),
-        where("folderId", "==", fromFolderId),
-      );
-      const notesSnap = await getDocs(notesQuery);
+  deleteFolder: async (userId: string, folderId: string) => {
+    const ref = doc(db, "folders", folderId);
+    await deleteDoc(ref);
+  },
 
-      // Update each note
-      const batch = writeBatch(db);
-      notesSnap.docs.forEach((noteDoc) => {
-        const ref = doc(db, "notes", noteDoc.id);
-        batch.update(ref, {
-          folderId: toFolderId || null,
-          folder: toFolderId ? "Folder" : "General", // Could be improved by looking up folder name
-          updatedAt: serverTimestamp(),
-        });
-      });
-
-      await batch.commit();
-      console.log(
-        `Moved ${notesSnap.docs.length} notes from folder ${fromFolderId} to ${toFolderId || "General"}`,
-      );
-    } catch (e) {
-      console.error("Error moving notes to folder:", e);
-    }
+  saveFoldersBatch: async (userId: string, folders: Folder[]) => {
+    const batch = writeBatch(db);
+    folders.forEach((folder) => {
+      const ref = doc(db, "folders", folder.id);
+      const payload = {
+        ...folder,
+        userId,
+        updatedAt: serverTimestamp(),
+      };
+      batch.set(ref, sanitizePayload(payload), { merge: true });
+    });
+    await batch.commit();
   },
 
   // --- Generic document operations ---
@@ -207,7 +176,7 @@ export const FirebaseService = {
     await deleteDoc(docRef);
   },
 
-  // --- Stats (Unchanged) ---
+  // --- Stats (Unchanged logic, kept for interface consistency) ---
   saveDailyActivity: async (
     userId: string,
     dateKey: string,
@@ -215,7 +184,17 @@ export const FirebaseService = {
   ) => {},
 };
 
-// Helper functions
+// Helper to handle Firestore timestamps vs Date/Numbers
+const createTimestampFromDate = (dateVal: any) => {
+  // If it's already a firestore timestamp-like (not a real one here without importing Timestamp class),
+  // best effort or just pass through for serverTimestamp if strictly new.
+  // If it's number (Date.now()), return it date object for Firestore?
+  // Firestore setDoc accepts Date objects.
+  if (typeof dateVal === "number") return new Date(dateVal);
+  if (dateVal instanceof Date) return dateVal;
+  return serverTimestamp();
+};
+
 const mapFirestoreDataToNote = (data: any): Note => {
   return {
     ...data,
