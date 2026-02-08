@@ -33,7 +33,7 @@ const LOCAL_KEYS = {
   TASKS: "procastify_tasks",
   QUIZZES: "procastify_quizzes",
   CUSTOM_MODES: "procastify_custom_modes",
-  FOLDERS: "procastify_folders", // NEW
+  FOLDERS: "procastify_folders",
 };
 
 const getLocalDB = <T>(key: string): T[] => {
@@ -236,111 +236,7 @@ export const StorageService = {
     });
   },
 
-  // ========================================
-  // --- FOLDERS (NEW) ---
-  // ========================================
-
-  /**
-   * Create a new folder
-   */
-  createFolder: async (folder: Folder): Promise<void> => {
-    if (!currentUserId) return;
-
-    if (isGuestMode) {
-      const folders = getLocalUserItems<Folder>(
-        LOCAL_KEYS.FOLDERS,
-        currentUserId,
-      );
-      folders.push(folder);
-      saveLocalUserItems(LOCAL_KEYS.FOLDERS, currentUserId, folders);
-    } else {
-      await FirebaseService.createFolder(currentUserId, folder);
-    }
-  },
-
-  /**
-   * Update an existing folder
-   */
-  updateFolder: async (
-    folderId: string,
-    updates: Partial<Folder>,
-  ): Promise<void> => {
-    if (!currentUserId) return;
-
-    if (isGuestMode) {
-      const folders = getLocalUserItems<Folder>(
-        LOCAL_KEYS.FOLDERS,
-        currentUserId,
-      );
-      const index = folders.findIndex((f) => f.id === folderId);
-
-      if (index >= 0) {
-        folders[index] = {
-          ...folders[index],
-          ...updates,
-          updatedAt: Date.now(),
-        };
-        saveLocalUserItems(LOCAL_KEYS.FOLDERS, currentUserId, folders);
-      }
-    } else {
-      await FirebaseService.updateFolder(currentUserId, folderId, updates);
-    }
-  },
-
-  /**
-   * Delete a folder and move its notes to "General"
-   */
-  deleteFolder: async (folderId: string): Promise<void> => {
-    if (!currentUserId) return;
-
-    // Move notes to General before deleting folder
-    const notes = await StorageService.getNotes();
-    const notesInFolder = notes.filter((n) => n.folderId === folderId);
-
-    // Update each note to remove folder reference
-    for (const note of notesInFolder) {
-      await StorageService.saveNote({
-        ...note,
-        folderId: undefined,
-        folder: "General",
-      });
-    }
-
-    // Delete the folder
-    if (isGuestMode) {
-      const folders = getLocalUserItems<Folder>(
-        LOCAL_KEYS.FOLDERS,
-        currentUserId,
-      );
-      const filtered = folders.filter((f) => f.id !== folderId);
-      saveLocalUserItems(LOCAL_KEYS.FOLDERS, currentUserId, filtered);
-    } else {
-      await FirebaseService.moveNotesToFolder(currentUserId, folderId, null);
-      await FirebaseService.deleteFolder(currentUserId, folderId);
-    }
-  },
-
-  /**
-   * Get all folders for current user
-   */
-  getFolders: async (): Promise<Folder[]> => {
-    if (!currentUserId) return [];
-
-    if (isGuestMode) {
-      return getLocalUserItems<Folder>(LOCAL_KEYS.FOLDERS, currentUserId);
-    } else {
-      try {
-        return await FirebaseService.getFolders(currentUserId);
-      } catch (e) {
-        console.error("Error fetching folders from Firebase:", e);
-        return [];
-      }
-    }
-  },
-
-  // ========================================
   // --- Notes ---
-  // ========================================
 
   deleteNote: async (noteId: string) => {
     if (!currentUserId) {
@@ -528,6 +424,68 @@ export const StorageService = {
   unpublishNote: async (noteId: string) => {
     if (!currentUserId || isGuestMode) return;
     await FirebaseService.unpublishNote(currentUserId, noteId);
+  },
+
+  // --- Folders ---
+
+  getFolders: async (): Promise<Folder[]> => {
+    if (!currentUserId) return [];
+
+    if (isGuestMode) {
+      return getLocalUserItems<Folder>(LOCAL_KEYS.FOLDERS, currentUserId);
+    } else {
+      try {
+        return await FirebaseService.getFolders(currentUserId);
+      } catch (e) {
+        console.error("Error fetching folders:", e);
+        return [];
+      }
+    }
+  },
+
+  saveFolder: async (folder: Folder) => {
+    if (!currentUserId) return;
+
+    if (isGuestMode) {
+      const folders = getLocalUserItems<Folder>(
+        LOCAL_KEYS.FOLDERS,
+        currentUserId,
+      );
+      const idx = folders.findIndex((f) => f.id === folder.id);
+      if (idx >= 0) {
+        folders[idx] = folder;
+      } else {
+        folders.push(folder);
+      }
+      saveLocalUserItems(LOCAL_KEYS.FOLDERS, currentUserId, folders);
+    } else {
+      await FirebaseService.saveFolder(currentUserId, folder);
+    }
+  },
+
+  deleteFolder: async (folderId: string) => {
+    if (!currentUserId) return;
+
+    if (isGuestMode) {
+      const folders = getLocalUserItems<Folder>(
+        LOCAL_KEYS.FOLDERS,
+        currentUserId,
+      );
+      const filtered = folders.filter((f) => f.id !== folderId);
+      saveLocalUserItems(LOCAL_KEYS.FOLDERS, currentUserId, filtered);
+    } else {
+      await FirebaseService.deleteFolder(currentUserId, folderId);
+    }
+  },
+
+  saveFolders: async (folders: Folder[]) => {
+    if (!currentUserId) return;
+
+    if (isGuestMode) {
+      saveLocalUserItems(LOCAL_KEYS.FOLDERS, currentUserId, folders);
+    } else {
+      await FirebaseService.saveFoldersBatch(currentUserId, folders);
+    }
   },
 
   // --- Queue & Tasks (Unchanged) ---

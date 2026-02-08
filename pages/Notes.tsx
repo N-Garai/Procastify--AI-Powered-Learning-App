@@ -13,7 +13,7 @@ import {
   Globe,
   GripVertical,
   FolderOpen,
-  ChevronDown,
+  X,
 } from "lucide-react";
 import DocumentEditor from "../components/DocumentEditor";
 import CanvasBoard from "../components/CanvasBoard";
@@ -25,10 +25,8 @@ interface NotesProps {
   onDeleteNote: (id: string) => Promise<void>;
   user: UserPreferences;
   onNavigate: (view: any) => void;
-  // NEW: Folder props
-  folders: Folder[];
-  selectedFolderId: string | null;
-  onSelectFolder: (folderId: string | null) => void;
+  activeFolderId?: string | null; // null = uncategorized, undefined = all notes
+  folders?: Folder[];
 }
 
 type ViewMode = "split" | "document" | "canvas";
@@ -39,21 +37,20 @@ const Notes: React.FC<NotesProps> = ({
   onDeleteNote,
   user,
   onNavigate,
-  folders,
-  selectedFolderId,
-  onSelectFolder,
+  activeFolderId,
+  folders = [],
 }) => {
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [search, setSearch] = useState("");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [showFolderDropdown, setShowFolderDropdown] = useState(false);
 
   // Resizable split view state
-  const [splitPosition, setSplitPosition] = useState(50);
+  const [splitPosition, setSplitPosition] = useState(50); // Percentage (0-100)
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Handle mouse move during drag
   const handleMouseMove = useCallback(
     (e: MouseEvent) => {
       if (!isDragging || !containerRef.current) return;
@@ -62,16 +59,19 @@ const Notes: React.FC<NotesProps> = ({
       const rect = container.getBoundingClientRect();
       const newPosition = ((e.clientX - rect.left) / rect.width) * 100;
 
+      // Clamp between 20% and 80%
       const clampedPosition = Math.min(80, Math.max(20, newPosition));
       setSplitPosition(clampedPosition);
     },
     [isDragging],
   );
 
+  // Handle mouse up to stop dragging
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);
   }, []);
 
+  // Add/remove global event listeners for drag
   useEffect(() => {
     if (isDragging) {
       document.addEventListener("mousemove", handleMouseMove);
@@ -95,6 +95,7 @@ const Notes: React.FC<NotesProps> = ({
 
   const activeNote = notes.find((n) => n.id === selectedNoteId);
 
+  // Migration / Data Access Helper
   const getCanvasElements = (note: Note) => {
     return note.canvas?.elements || note.elements || [];
   };
@@ -117,7 +118,7 @@ const Notes: React.FC<NotesProps> = ({
       title: "Untitled Note",
       tags: [],
       folder: "General",
-      folderId: selectedFolderId || undefined, // NEW: Assign to current folder
+      folderId: activeFolderId !== undefined ? activeFolderId : null,
       lastModified: Date.now(),
       document: { blocks: [] },
       canvas: { elements: [] },
@@ -176,28 +177,23 @@ const Notes: React.FC<NotesProps> = ({
     setNotes(notes.map((n) => (n.id === activeNote.id ? updatedNote : n)));
   };
 
-  // NEW: Move note to different folder
-  const moveNoteToFolder = (folderId: string | null) => {
-    if (!activeNote) return;
+  const updateNoteFolder = async (noteId: string, folderId: string | null) => {
+    const note = notes.find((n) => n.id === noteId);
+    if (!note) return;
 
     const folderName = folderId
       ? folders.find((f) => f.id === folderId)?.name || "General"
       : "General";
 
     const updatedNote = {
-      ...activeNote,
-      folderId: folderId || undefined,
-      folder: folderName, // Keep for backward compatibility
+      ...note,
+      folderId,
+      folder: folderName,
       lastModified: Date.now(),
     };
 
-    console.log(
-      "[Notes.tsx] moveNoteToFolder - Moving note to folder:",
-      updatedNote,
-    );
-    StorageService.saveNote(updatedNote);
-    setNotes(notes.map((n) => (n.id === activeNote.id ? updatedNote : n)));
-    setShowFolderDropdown(false);
+    await StorageService.saveNote(updatedNote);
+    setNotes(notes.map((n) => (n.id === noteId ? updatedNote : n)));
   };
 
   const handleTogglePublish = async () => {
@@ -218,50 +214,68 @@ const Notes: React.FC<NotesProps> = ({
     }
   };
 
-  // Filter notes by folder
+  // Filter notes based on active folder
   const filteredNotes = notes.filter((note) => {
-    const matchesSearch = note.title
-      .toLowerCase()
-      .includes(search.toLowerCase());
-    const matchesFolder =
-      selectedFolderId === null || note.folderId === selectedFolderId;
-    return matchesSearch && matchesFolder;
+    // Search filter
+    if (search && !note.title.toLowerCase().includes(search.toLowerCase())) {
+      return false;
+    }
+
+    // Folder filter
+    if (activeFolderId === undefined) {
+      // Show all notes
+      return true;
+    } else if (activeFolderId === null) {
+      // Show uncategorized notes
+      return !note.folderId || note.folderId === null;
+    } else {
+      // Show notes in specific folder
+      return note.folderId === activeFolderId;
+    }
   });
 
-  // Get current folder name for display
-  const currentFolderName = selectedFolderId
-    ? folders.find((f) => f.id === selectedFolderId)?.name || "All Notes"
-    : "All Notes";
+  // Get active folder name for display
+  const activeFolderName =
+    activeFolderId === undefined
+      ? "All Notes"
+      : activeFolderId === null
+        ? "Uncategorized"
+        : folders.find((f) => f.id === activeFolderId)?.name ||
+          "Unknown Folder";
 
   if (!selectedNoteId) {
     return (
       <div className="p-8 h-full overflow-y-auto">
         <div className="flex justify-between items-center mb-8 max-w-6xl mx-auto">
-          <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-bold text-white">My Notes</h1>
-            {selectedFolderId && (
-              <>
-                <ChevronDown
-                  size={20}
-                  className="text-discord-textMuted rotate-[-90deg]"
-                />
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-discord-panel rounded-lg border border-white/10">
-                  <div
-                    className="w-3 h-3 rounded-full"
-                    style={{
-                      backgroundColor:
-                        folders.find((f) => f.id === selectedFolderId)?.color ||
-                        "#5865F2",
-                    }}
-                  />
-                  <span className="text-white font-medium">
-                    {currentFolderName}
-                  </span>
-                </div>
-              </>
+          <div>
+            <div className="flex items-center gap-3 mb-2">
+              <h1 className="text-3xl font-bold text-white">
+                {activeFolderName}
+              </h1>
+              {activeFolderId !== undefined && (
+                <button
+                  onClick={() => onNavigate("notes")}
+                  className="text-discord-textMuted hover:text-white transition-colors"
+                  title="Clear filter"
+                >
+                  <X size={20} />
+                </button>
+              )}
+            </div>
+            {activeFolderId !== undefined && (
+              <p className="text-discord-textMuted text-sm">
+                {filteredNotes.length} note
+                {filteredNotes.length !== 1 ? "s" : ""}
+              </p>
             )}
           </div>
           <div className="flex gap-3">
+            <button
+              onClick={() => onNavigate("folders")}
+              className="bg-[#2b2d31] hover:bg-[#3f4147] border border-white/5 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-all font-medium"
+            >
+              <FolderOpen size={18} /> Folders
+            </button>
             <button
               onClick={() => onNavigate("store")}
               className="bg-[#2b2d31] hover:bg-[#3f4147] border border-white/5 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-all font-medium"
@@ -290,11 +304,12 @@ const Notes: React.FC<NotesProps> = ({
           />
         </div>
 
-        {/* Notes Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
           {filteredNotes.map((note) => {
             const elements = getCanvasElements(note);
-            const noteFolder = folders.find((f) => f.id === note.folderId);
+            const folderColor =
+              note.folderId &&
+              folders.find((f) => f.id === note.folderId)?.color;
 
             return (
               <div
@@ -302,6 +317,19 @@ const Notes: React.FC<NotesProps> = ({
                 onClick={() => setSelectedNoteId(note.id)}
                 className="bg-discord-panel aspect-video rounded-xl border border-white/5 hover:border-discord-accent/50 cursor-pointer transition-all group relative overflow-hidden shadow-sm hover:shadow-md flex flex-col"
               >
+                {/* Folder Badge */}
+                {note.folderId && (
+                  <div
+                    className="absolute top-3 left-3 px-2 py-1 rounded text-xs font-medium text-white z-20"
+                    style={{
+                      backgroundColor: folderColor || "#5865F2",
+                    }}
+                  >
+                    {folders.find((f) => f.id === note.folderId)?.name ||
+                      "Folder"}
+                  </div>
+                )}
+
                 {/* Preview Area */}
                 <div className="flex-1 bg-[#2b2d31] relative overflow-hidden">
                   <div className="absolute inset-0 opacity-50 scale-50 origin-top-left w-[200%] h-[200%] pointer-events-none">
@@ -324,18 +352,9 @@ const Notes: React.FC<NotesProps> = ({
                 </div>
 
                 <div className="p-4 bg-discord-panel z-10 border-t border-white/5">
-                  <div className="flex items-center gap-2 mb-1">
-                    <h3 className="font-bold text-lg text-white truncate flex-1">
-                      {note.title}
-                    </h3>
-                    {noteFolder && (
-                      <div
-                        className="w-2 h-2 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: noteFolder.color }}
-                        title={noteFolder.name}
-                      />
-                    )}
-                  </div>
+                  <h3 className="font-bold text-lg text-white truncate">
+                    {note.title}
+                  </h3>
                   <div className="flex items-center gap-2 mt-1">
                     <span className="text-xs text-discord-textMuted">
                       {elements.length} canvas items
@@ -360,25 +379,27 @@ const Notes: React.FC<NotesProps> = ({
 
         {/* Empty State */}
         {filteredNotes.length === 0 && (
-          <div className="text-center py-16 max-w-md mx-auto">
-            <FolderOpen
-              size={64}
+          <div className="text-center py-16 max-w-6xl mx-auto">
+            <FileText
               className="mx-auto text-discord-textMuted mb-4"
+              size={64}
             />
             <h3 className="text-xl font-bold text-white mb-2">
-              {search ? "No notes found" : `No notes in ${currentFolderName}`}
+              {search ? "No notes found" : "No notes yet"}
             </h3>
             <p className="text-discord-textMuted mb-6">
               {search
                 ? "Try a different search term"
-                : "Create your first note to get started"}
+                : activeFolderId !== undefined
+                  ? "Create a note in this folder"
+                  : "Create your first note to get started"}
             </p>
             {!search && (
               <button
                 onClick={createNote}
-                className="bg-discord-accent hover:bg-discord-accentHover text-white px-6 py-3 rounded-lg flex items-center gap-2 mx-auto transition-colors font-medium"
+                className="bg-discord-accent hover:bg-discord-accentHover text-white px-6 py-3 rounded-lg font-medium transition-colors"
               >
-                <Plus size={18} /> Create Note
+                Create Note
               </button>
             )}
           </div>
@@ -388,9 +409,6 @@ const Notes: React.FC<NotesProps> = ({
   }
 
   if (!activeNote) return null;
-
-  // Get the folder for the active note
-  const activeNoteFolder = folders.find((f) => f.id === activeNote.folderId);
 
   return (
     <div className="h-screen flex flex-col bg-[#1e1f22] overflow-hidden">
@@ -412,65 +430,26 @@ const Notes: React.FC<NotesProps> = ({
             onFocus={() => setIsEditingTitle(true)}
             onBlur={() => setIsEditingTitle(false)}
             className={`bg-transparent text-white font-bold text-xl focus:outline-none w-64 px-3 py-1.5 rounded-lg transition-all border border-transparent
-                            ${isEditingTitle ? "bg-black/20 border-white/10" : "hover:bg-white/5 hover:border-white/5"}
-                        `}
+                ${isEditingTitle ? "bg-black/20 border-white/10" : "hover:bg-white/5 hover:border-white/5"}
+            `}
             placeholder="Untitled Note"
           />
 
-          {/* Folder Badge & Selector */}
-          <div className="relative">
-            <button
-              onClick={() => setShowFolderDropdown(!showFolderDropdown)}
-              className="flex items-center gap-2 px-3 py-1.5 bg-[#2b2d31] hover:bg-[#3f4147] rounded-lg border border-white/10 transition-all"
-            >
-              <div
-                className="w-3 h-3 rounded-full"
-                style={{
-                  backgroundColor: activeNoteFolder?.color || "#5865F2",
-                }}
-              />
-              <span className="text-sm text-white">
-                {activeNoteFolder?.name || "General"}
-              </span>
-              <ChevronDown size={14} className="text-discord-textMuted" />
-            </button>
-
-            {/* Folder Dropdown */}
-            {showFolderDropdown && (
-              <div className="absolute top-full mt-2 left-0 bg-discord-panel border border-white/10 rounded-lg shadow-lg min-w-[200px] z-50">
-                <div className="p-2 space-y-1">
-                  <button
-                    onClick={() => moveNoteToFolder(null)}
-                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-all text-sm ${
-                      !activeNote.folderId
-                        ? "bg-discord-accent text-white"
-                        : "text-discord-textMuted hover:bg-discord-hover hover:text-white"
-                    }`}
-                  >
-                    <FolderOpen size={14} />
-                    <span>General</span>
-                  </button>
-                  {folders.map((folder) => (
-                    <button
-                      key={folder.id}
-                      onClick={() => moveNoteToFolder(folder.id)}
-                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-all text-sm ${
-                        activeNote.folderId === folder.id
-                          ? "bg-discord-accent text-white"
-                          : "text-discord-textMuted hover:bg-discord-hover hover:text-white"
-                      }`}
-                    >
-                      <div
-                        className="w-3 h-3 rounded-full"
-                        style={{ backgroundColor: folder.color }}
-                      />
-                      <span>{folder.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          {/* Folder Selector */}
+          <select
+            value={activeNote.folderId || ""}
+            onChange={(e) =>
+              updateNoteFolder(activeNote.id, e.target.value || null)
+            }
+            className="bg-black/20 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-discord-accent transition-all"
+          >
+            <option value="">Uncategorized</option>
+            {folders.map((folder) => (
+              <option key={folder.id} value={folder.id}>
+                {folder.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* View Toggles */}
@@ -479,11 +458,7 @@ const Notes: React.FC<NotesProps> = ({
             <>
               <button
                 onClick={handleTogglePublish}
-                className={`p-2 rounded-md transition-all flex items-center gap-2 ${
-                  activeNote.isPublic
-                    ? "bg-green-600 text-white"
-                    : "text-discord-textMuted hover:text-white hover:bg-white/5"
-                }`}
+                className={`p-2 rounded-md transition-all flex items-center gap-2 ${activeNote.isPublic ? "bg-green-600 text-white" : "text-discord-textMuted hover:text-white hover:bg-white/5"}`}
                 title={
                   activeNote.isPublic
                     ? "Published (Click to unpublish)"
@@ -497,11 +472,7 @@ const Notes: React.FC<NotesProps> = ({
           )}
           <button
             onClick={() => setViewMode("document")}
-            className={`p-2 rounded-md transition-all flex items-center gap-2 ${
-              viewMode === "document"
-                ? "bg-[#5865F2] text-white"
-                : "text-discord-textMuted hover:text-white"
-            }`}
+            className={`p-2 rounded-md transition-all flex items-center gap-2 ${viewMode === "document" ? "bg-[#5865F2] text-white" : "text-discord-textMuted hover:text-white"}`}
             title="Document Only"
           >
             <FileText size={18} />
@@ -509,11 +480,7 @@ const Notes: React.FC<NotesProps> = ({
           <div className="w-[1px] bg-white/10 my-1 mx-1"></div>
           <button
             onClick={() => setViewMode("split")}
-            className={`p-2 rounded-md transition-all flex items-center gap-2 ${
-              viewMode === "split"
-                ? "bg-[#5865F2] text-white"
-                : "text-discord-textMuted hover:text-white"
-            }`}
+            className={`p-2 rounded-md transition-all flex items-center gap-2 ${viewMode === "split" ? "bg-[#5865F2] text-white" : "text-discord-textMuted hover:text-white"}`}
             title="Split View"
           >
             <SplitSquareHorizontal size={18} />
@@ -521,11 +488,7 @@ const Notes: React.FC<NotesProps> = ({
           <div className="w-[1px] bg-white/10 my-1 mx-1"></div>
           <button
             onClick={() => setViewMode("canvas")}
-            className={`p-2 rounded-md transition-all flex items-center gap-2 ${
-              viewMode === "canvas"
-                ? "bg-[#5865F2] text-white"
-                : "text-discord-textMuted hover:text-white"
-            }`}
+            className={`p-2 rounded-md transition-all flex items-center gap-2 ${viewMode === "canvas" ? "bg-[#5865F2] text-white" : "text-discord-textMuted hover:text-white"}`}
             title="Canvas Only"
           >
             <ImageIcon size={18} />
@@ -550,23 +513,17 @@ const Notes: React.FC<NotesProps> = ({
           </div>
         )}
 
-        {/* Resizable Divider */}
+        {/* Resizable Divider - Only in split mode */}
         {viewMode === "split" && (
           <div
-            className={`w-2 bg-[#2b2d31] hover:bg-discord-accent/50 cursor-col-resize flex items-center justify-center transition-colors group ${
-              isDragging ? "bg-discord-accent" : ""
-            }`}
+            className={`w-2 bg-[#2b2d31] hover:bg-discord-accent/50 cursor-col-resize flex items-center justify-center transition-colors group ${isDragging ? "bg-discord-accent" : ""}`}
             onMouseDown={(e) => {
               e.preventDefault();
               setIsDragging(true);
             }}
           >
             <div
-              className={`w-1 h-12 rounded-full transition-colors ${
-                isDragging
-                  ? "bg-discord-accent"
-                  : "bg-white/20 group-hover:bg-discord-accent/70"
-              }`}
+              className={`w-1 h-12 rounded-full transition-colors ${isDragging ? "bg-discord-accent" : "bg-white/20 group-hover:bg-discord-accent/70"}`}
             />
           </div>
         )}
