@@ -14,9 +14,11 @@ import {
   GripVertical,
   FolderOpen,
   X,
+  Upload,
 } from "lucide-react";
 import DocumentEditor from "../components/DocumentEditor";
 import CanvasBoard from "../components/CanvasBoard";
+import MigrationHub from "../components/MigrationHub";
 import { StorageService } from "../services/storageService";
 
 interface NotesProps {
@@ -44,6 +46,7 @@ const Notes: React.FC<NotesProps> = ({
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [search, setSearch] = useState("");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [showMigrationHub, setShowMigrationHub] = useState(false);
 
   // Resizable split view state
   const [splitPosition, setSplitPosition] = useState(50); // Percentage (0-100)
@@ -115,6 +118,26 @@ const Notes: React.FC<NotesProps> = ({
     }
     // Fallback for empty or legacy: Return empty array to let Editor initialize default
     return [];
+  };
+
+  const handleMigrationImport = async (blocks: any[], title: string) => {
+    const newNote: Note = {
+      id: Date.now().toString(),
+      userId: user.id,
+      title: title || "Imported Note",
+      tags: ["Imported"],
+      folder: "General",
+      folderId: activeFolderId !== undefined ? activeFolderId : null,
+      lastModified: Date.now(),
+      document: { blocks },
+      canvas: { elements: [] },
+      elements: [],
+      createdAt: Date.now(),
+    };
+    await StorageService.saveNote(newNote);
+    setNotes([newNote, ...notes]);
+    setShowMigrationHub(false);
+    setSelectedNoteId(newNote.id);
   };
 
   const createNote = async () => {
@@ -296,6 +319,12 @@ const Notes: React.FC<NotesProps> = ({
               <Globe size={18} /> Community
             </button>
             <button
+              onClick={() => setShowMigrationHub(true)}
+              className="bg-[#2b2d31] hover:bg-[#3f4147] border border-white/5 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-all font-medium"
+            >
+              <Upload size={18} /> Import
+            </button>
+            <button
               onClick={createNote}
               className="bg-discord-accent hover:bg-discord-accentHover text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors font-medium"
             >
@@ -417,6 +446,13 @@ const Notes: React.FC<NotesProps> = ({
               </button>
             )}
           </div>
+        )}
+
+        {showMigrationHub && (
+          <MigrationHub
+            onImport={handleMigrationImport}
+            onClose={() => setShowMigrationHub(false)}
+          />
         )}
       </div>
     );
