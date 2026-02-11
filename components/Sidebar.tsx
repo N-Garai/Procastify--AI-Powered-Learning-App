@@ -33,7 +33,14 @@ const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapse,
   userRole = "student",
 }) => {
-  const NavItem = ({
+  // Handle navigation + auto-close mobile drawer
+  const handleNav = (view: ViewState) => {
+    onNavigate(view);
+    if (mobileOpen) onMobileToggle();
+  };
+
+  // --- Desktop NavItem (supports collapsed mode) ---
+  const DesktopNavItem = ({
     view,
     icon: Icon,
     label,
@@ -45,12 +52,11 @@ const Sidebar: React.FC<SidebarProps> = ({
     const active = currentView === view;
     return (
       <button
-        onClick={() => onNavigate(view)}
+        onClick={() => handleNav(view)}
         className={`w-full flex items-center ${collapsed ? "justify-center px-2" : "gap-3 px-4"} py-3 rounded-xl transition-all duration-300 font-medium group relative overflow-hidden flex-1 max-h-16
-          ${
-            active
-              ? "bg-gradient-to-r from-discord-panel to-discord-panel/80 text-white shadow-lg shadow-discord-accent/20 border border-discord-accent/30"
-              : "text-discord-textMuted hover:bg-gradient-to-r hover:from-discord-hover hover:to-discord-hover/80 hover:text-white hover:scale-105"
+          ${active
+            ? "bg-gradient-to-r from-discord-panel to-discord-panel/80 text-white shadow-lg shadow-discord-accent/20 border border-discord-accent/30"
+            : "text-discord-textMuted hover:bg-gradient-to-r hover:from-discord-hover hover:to-discord-hover/80 hover:text-white hover:scale-105"
           }`}
         title={collapsed ? label : undefined}
       >
@@ -59,11 +65,10 @@ const Sidebar: React.FC<SidebarProps> = ({
         )}
         <Icon
           size={20}
-          className={`transition-all duration-300 relative z-10 ${collapsed ? "flex-shrink-0" : ""} ${
-            active
-              ? "text-discord-accent drop-shadow-sm"
-              : "text-discord-textMuted group-hover:text-white group-hover:scale-110"
-          }`}
+          className={`transition-all duration-300 relative z-10 flex-shrink-0 ${active
+            ? "text-discord-accent drop-shadow-sm"
+            : "text-discord-textMuted group-hover:text-white group-hover:scale-110"
+            }`}
         />
         {!collapsed && (
           <>
@@ -80,34 +85,42 @@ const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <div
-      className={`${collapsed ? "w-20" : "w-64"} bg-gradient-to-b from-[#111214] to-[#0a0b0c] flex flex-col h-screen fixed left-0 top-0 border-r border-white/10 z-50 backdrop-blur-sm transition-all duration-300 ease-in-out`}
-    >
-      {/* Header */}
-      <div
-        className={`flex items-center border-b border-white/5 bg-[#111214]/50 transition-all duration-300 ${collapsed ? "p-4 justify-center" : "px-5 py-5 justify-between"}`}
+    <>
+      {/* ====== MOBILE OVERLAY (backdrop) ====== */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
+          onClick={onMobileToggle}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* ====== MOBILE SLIDE-IN DRAWER ====== */}
+      <aside
+        className={`
+          fixed top-0 left-0 z-50 h-screen w-72
+          bg-gradient-to-b from-[#111214] to-[#0a0b0c]
+          border-r border-white/10
+          flex flex-col
+          transition-transform duration-300 ease-in-out
+          md:hidden
+          ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
+        `}
       >
-        {!collapsed ? (
-          <>
-            <div className="flex items-center">
-              <div className="w-8 h-8 bg-gradient-to-br from-discord-accent to-purple-600 rounded-lg flex items-center justify-center shadow-lg shadow-discord-accent/30 hover:shadow-discord-accent/50 transition-all duration-300 hover:scale-110 group">
-                <BrainCircuit
-                  className="text-white group-hover:rotate-12 transition-transform duration-300"
-                  size={18}
-                />
-              </div>
-              <h1 className="text-xl font-bold text-white tracking-tight hover:text-discord-accent transition-colors duration-300 cursor-default ml-3 font-display">
-                Procastify
-              </h1>
+        {/* Mobile Header */}
+        <div className="flex items-center justify-between px-5 py-5 border-b border-white/5">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-discord-accent to-purple-600 flex items-center justify-center shadow-lg shadow-discord-accent/30">
+              <BrainCircuit size={20} className="text-white" />
             </div>
             <button
               onClick={onToggleCollapse}
               className="flex items-center justify-center w-8 h-8 text-discord-textMuted hover:text-white hover:bg-discord-hover rounded-lg transition-all duration-300 group"
               title="Collapse sidebar"
             >
-              <PanelLeftClose
-                size={18}
-                className="group-hover:scale-110 transition-transform"
+              <BrainCircuit
+                className="text-white group-hover:rotate-12 transition-transform duration-300"
+                size={24}
               />
             </button>
           </>
@@ -129,13 +142,18 @@ const Sidebar: React.FC<SidebarProps> = ({
             className="flex items-center justify-center w-10 h-10 text-discord-textMuted hover:text-white hover:bg-discord-hover rounded-lg transition-all duration-300 group"
             title="Expand sidebar"
           >
-            <PanelLeftOpen
+            <LogOut
               size={20}
-              className="group-hover:scale-110 transition-transform"
+              className="group-hover:rotate-12 transition-transform duration-300 flex-shrink-0"
             />
+            {!collapsed && (
+              <span className="group-hover:translate-x-1 transition-transform duration-300">
+                Log Out
+              </span>
+            )}
           </button>
         </div>
-      )}
+      </div>
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 flex flex-col justify-evenly gap-1 overflow-y-auto no-scrollbar">
