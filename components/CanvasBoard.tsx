@@ -3,8 +3,8 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { CanvasEngine } from "./canvas/CanvasEngine";
-import { ToolType, Shape } from "./canvas/types";
-import { MousePointer, Hand, Square, Circle, Minus, Pencil, Eraser, Type, Diamond, MoveRight } from "lucide-react";
+import { ToolType, Shape, StrokeWidth, StrokeStyle, RoughStyle, FillStyle, FontSize } from "./canvas/types";
+import { MousePointer, Hand, Square, Circle, Minus, Pencil, Eraser, Type, Diamond, MoveRight, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 
 interface CanvasBoardProps {
     canvasId?: string;
@@ -18,6 +18,18 @@ export default function CanvasBoard({ canvasId, readOnly = false, elements }: Ca
     const [activeTool, setActiveTool] = useState<ToolType>("selection");
     const [color, setColor] = useState("#ffffff"); // Default White
     const [loading, setLoading] = useState(true);
+
+    // New style states
+    const [strokeWidth, setStrokeWidth] = useState<StrokeWidth>(2);
+    const [strokeStyle, setStrokeStyle] = useState<StrokeStyle>("solid");
+    const [roughStyle, setRoughStyle] = useState<RoughStyle>(0);
+    const [fillStyle, setFillStyle] = useState<FillStyle>("solid");
+    const [fontSize, setFontSize] = useState<FontSize>("Medium");
+    const [zoomInfo, setZoomInfo] = useState({
+        scale: 1,
+        canZoomIn: true,
+        canZoomOut: false
+    });
 
 
 
@@ -101,37 +113,171 @@ export default function CanvasBoard({ canvasId, readOnly = false, elements }: Ca
         if (engine) engine.strokeFill = e.target.value;
     };
 
+    const changeStrokeWidth = (width: StrokeWidth) => {
+        setStrokeWidth(width);
+        if (engine) engine.setStrokeWidth(width);
+    };
+
+    const changeStrokeStyle = (style: StrokeStyle) => {
+        setStrokeStyle(style);
+        if (engine) engine.setStrokeStyle(style);
+    };
+
+    const changeRoughStyle = (style: RoughStyle) => {
+        setRoughStyle(style);
+        if (engine) engine.setRoughStyle(style);
+    };
+
+    const changeFontSize = (size: FontSize) => {
+        setFontSize(size);
+        if (engine) engine.fontSize = size;
+    };
+
+    const updateZoomInfo = () => {
+        if (engine) {
+            setZoomInfo(engine.getZoomInfo());
+        }
+    };
+
+    const zoomIn = () => {
+        if (engine) {
+            engine.zoomIn();
+            updateZoomInfo();
+        }
+    };
+
+    const zoomOut = () => {
+        if (engine) {
+            engine.zoomOut();
+            updateZoomInfo();
+        }
+    };
+
+    const resetZoom = () => {
+        if (engine) {
+            engine.resetZoom();
+            updateZoomInfo();
+        }
+    };
+
     const clearCanvas = () => {
         if (engine && !readOnly) engine.clear();
     };
 
     return (
         <div className="relative w-full h-full overflow-hidden bg-zinc-950 flex flex-col">
-            {/* Toolbar */}
+            {/* Main Toolbar */}
             {!readOnly && (
-                <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-zinc-900 shadow-xl rounded-lg p-2 flex gap-2 z-10 border border-zinc-800">
-                    <ToolButton icon={<MousePointer size={18} />} active={activeTool === "selection"} onClick={() => selectTool("selection")} title="Select" />
-                    <ToolButton icon={<Hand size={18} />} active={activeTool === "grab"} onClick={() => selectTool("grab")} title="Pan (Hold Space)" />
-                    <div className="w-px bg-zinc-700 mx-1"></div>
-                    <ToolButton icon={<Square size={18} />} active={activeTool === "rectangle"} onClick={() => selectTool("rectangle")} title="Rectangle" />
-                    <ToolButton icon={<Diamond size={18} />} active={activeTool === "diamond"} onClick={() => selectTool("diamond")} title="Diamond" />
-                    <ToolButton icon={<Circle size={18} />} active={activeTool === "ellipse"} onClick={() => selectTool("ellipse")} title="Ellipse" />
-                    <ToolButton icon={<Minus size={18} />} active={activeTool === "line"} onClick={() => selectTool("line")} title="Line" />
-                    <ToolButton icon={<MoveRight size={18} />} active={activeTool === "arrow"} onClick={() => selectTool("arrow")} title="Arrow" />
-                    <ToolButton icon={<Pencil size={18} />} active={activeTool === "free-draw"} onClick={() => selectTool("free-draw")} title="Free Draw" />
-                    <ToolButton icon={<Type size={18} />} active={activeTool === "text"} onClick={() => selectTool("text")} title="Text" />
-                    <div className="w-px bg-zinc-700 mx-1"></div>
-                    <ToolButton icon={<Eraser size={18} />} active={activeTool === "eraser"} onClick={() => selectTool("eraser")} title="Eraser" />
-
-                    <input
-                        type="color"
-                        value={color}
-                        onChange={changeColor}
-                        className="w-6 h-6 cursor-pointer rounded bg-transparent border-none ml-2"
-                        title="Color"
-                    />
-
-                    <button onClick={clearCanvas} className="text-xs text-red-400 hover:text-red-300 px-2 rounded font-medium">Clear</button>
+                <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-zinc-900 shadow-xl rounded-lg p-3 flex gap-2 z-10 border border-zinc-800 max-w-5xl">
+                    <div className="flex gap-2 items-center">
+                        {/* Selection Tools */}
+                        <ToolButton icon={<MousePointer size={18} />} active={activeTool === "selection"} onClick={() => selectTool("selection")} title="Select (V)" />
+                        <ToolButton icon={<Hand size={18} />} active={activeTool === "grab"} onClick={() => selectTool("grab")} title="Pan (Space)" />
+                        
+                        <div className="w-px bg-zinc-700 mx-1 h-6"></div>
+                        
+                        {/* Shape Tools */}
+                        <ToolButton icon={<Square size={18} />} active={activeTool === "rectangle"} onClick={() => selectTool("rectangle")} title="Rectangle (R)" />
+                        <ToolButton icon={<Diamond size={18} />} active={activeTool === "diamond"} onClick={() => selectTool("diamond")} title="Diamond (D)" />
+                        <ToolButton icon={<Circle size={18} />} active={activeTool === "ellipse"} onClick={() => selectTool("ellipse")} title="Ellipse (E)" />
+                        <ToolButton icon={<Minus size={18} />} active={activeTool === "line"} onClick={() => selectTool("line")} title="Line (L)" />
+                        <ToolButton icon={<MoveRight size={18} />} active={activeTool === "arrow"} onClick={() => selectTool("arrow")} title="Arrow (A)" />
+                        
+                        <div className="w-px bg-zinc-700 mx-1 h-6"></div>
+                        
+                        {/* Draw Tools */}
+                        <ToolButton icon={<Pencil size={18} />} active={activeTool === "free-draw"} onClick={() => selectTool("free-draw")} title="Free Draw (F)" />
+                        <ToolButton icon={<Type size={18} />} active={activeTool === "text"} onClick={() => selectTool("text")} title="Text (T)" />
+                        <ToolButton icon={<Eraser size={18} />} active={activeTool === "eraser"} onClick={() => selectTool("eraser")} title="Eraser (X)" />
+                        
+                        <div className="w-px bg-zinc-700 mx-1 h-6"></div>
+                        
+                        {/* Color */}
+                        <input
+                            type="color"
+                            value={color}
+                            onChange={changeColor}
+                            className="w-8 h-8 cursor-pointer rounded border border-zinc-600 bg-transparent"
+                            title="Color"
+                        />
+                        
+                        <div className="w-px bg-zinc-700 mx-1 h-6"></div>
+                        
+                        {/* Stroke Width */}
+                        <div className="flex gap-1">
+                            {([1, 2, 3, 4, 5] as StrokeWidth[]).map(width => (
+                                <StrokeWidthButton
+                                    key={width}
+                                    width={width}
+                                    active={strokeWidth === width}
+                                    onClick={() => changeStrokeWidth(width)}
+                                />
+                            ))}
+                        </div>
+                        
+                        <div className="w-px bg-zinc-700 mx-1 h-6"></div>
+                        
+                        {/* Stroke Style */}
+                        <div className="flex gap-1">
+                            <StyleButton style="solid" active={strokeStyle === "solid"} onClick={() => changeStrokeStyle("solid")} />
+                            <StyleButton style="dashed" active={strokeStyle === "dashed"} onClick={() => changeStrokeStyle("dashed")} />
+                            <StyleButton style="dotted" active={strokeStyle === "dotted"} onClick={() => changeStrokeStyle("dotted")} />
+                        </div>
+                        
+                        {/* Font Size (for text tool) */}
+                        {activeTool === "text" && (
+                            <>
+                                <div className="w-px bg-zinc-700 mx-1 h-6"></div>
+                                <select
+                                    value={fontSize}
+                                    onChange={(e) => changeFontSize(e.target.value as FontSize)}
+                                    className="bg-zinc-800 text-zinc-200 text-xs px-2 py-1 rounded border border-zinc-600"
+                                >
+                                    <option value="Small">Small</option>
+                                    <option value="Medium">Medium</option>
+                                    <option value="Large">Large</option>
+                                    <option value="Extra Large">XL</option>
+                                </select>
+                            </>
+                        )}
+                        
+                        <div className="w-px bg-zinc-700 mx-1 h-6"></div>
+                        
+                        {/* Zoom Controls */}
+                        <div className="flex gap-1">
+                            <ToolButton 
+                                icon={<ZoomOut size={18} />} 
+                                active={false} 
+                                onClick={zoomOut} 
+                                title="Zoom Out (-)"
+                                disabled={!zoomInfo.canZoomOut}
+                            />
+                            <button 
+                                onClick={resetZoom}
+                                className="text-xs px-2 py-1 text-zinc-400 hover:text-zinc-200 rounded"
+                                title="Reset Zoom (0)"
+                            >
+                                {Math.round(zoomInfo.scale * 100)}%
+                            </button>
+                            <ToolButton 
+                                icon={<ZoomIn size={18} />} 
+                                active={false} 
+                                onClick={zoomIn} 
+                                title="Zoom In (+)"
+                                disabled={!zoomInfo.canZoomIn}
+                            />
+                        </div>
+                        
+                        <div className="w-px bg-zinc-700 mx-1 h-6"></div>
+                        
+                        {/* Clear */}
+                        <button 
+                            onClick={clearCanvas} 
+                            className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded font-medium"
+                        >
+                            Clear
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -148,18 +294,97 @@ export default function CanvasBoard({ canvasId, readOnly = false, elements }: Ca
     );
 }
 
-// Simple Helper Component
-function ToolButton({ icon, active, onClick, title }: { icon: React.ReactNode, active: boolean, onClick: () => void, title?: string }) {
+// Helper Components
+function ToolButton({ 
+    icon, 
+    active, 
+    onClick, 
+    title, 
+    disabled = false 
+}: { 
+    icon: React.ReactNode, 
+    active: boolean, 
+    onClick: () => void, 
+    title?: string,
+    disabled?: boolean
+}) {
     return (
         <button
             onClick={onClick}
             title={title}
-            className={`p-2 rounded-md transition-all ${active
-                ? "bg-indigo-600 text-white"
-                : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-                }`}
+            disabled={disabled}
+            className={`p-2 rounded-md transition-all ${
+                active
+                    ? "bg-indigo-600 text-white"
+                    : disabled 
+                    ? "text-zinc-600 cursor-not-allowed"
+                    : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+            }`}
         >
             {icon}
+        </button>
+    )
+}
+
+function StrokeWidthButton({ 
+    width, 
+    active, 
+    onClick 
+}: { 
+    width: StrokeWidth, 
+    active: boolean, 
+    onClick: () => void 
+}) {
+    return (
+        <button
+            onClick={onClick}
+            title={`Stroke Width: ${width}px`}
+            className={`p-2 rounded-md transition-all flex items-center justify-center ${
+                active
+                    ? "bg-indigo-600 text-white"
+                    : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+            }`}
+        >
+            <div
+                className="bg-current rounded-full"
+                style={{
+                    width: `${Math.min(width * 2, 8)}px`,
+                    height: `${Math.min(width * 2, 8)}px`
+                }}
+            />
+        </button>
+    )
+}
+
+function StyleButton({ 
+    style, 
+    active, 
+    onClick 
+}: { 
+    style: StrokeStyle, 
+    active: boolean, 
+    onClick: () => void 
+}) {
+    const getLinePattern = () => {
+        switch (style) {
+            case "solid": return "────";
+            case "dashed": return "- - -";
+            case "dotted": return "· · ·";
+            default: return "────";
+        }
+    };
+
+    return (
+        <button
+            onClick={onClick}
+            title={`Stroke Style: ${style}`}
+            className={`px-2 py-1 rounded-md transition-all text-xs font-mono ${
+                active
+                    ? "bg-indigo-600 text-white"
+                    : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+            }`}
+        >
+            {getLinePattern()}
         </button>
     )
 }

@@ -14,10 +14,11 @@ export type ToolType =
 export type StrokeStyle = "solid" | "dashed" | "dotted";
 export type RoughStyle = 0 | 1 | 2; // 0: Solid, 1: Sketchy, 2: Very Sketchy
 export type FillStyle = "hachure" | "solid" | "zigzag" | "cross-hatch" | "dots";
-export type StrokeWidth = 1 | 2 | 4;
+export type StrokeWidth = 1 | 2 | 3 | 4 | 5;
+export type StrokeType = "straight" | "curved";
 export type StrokeEdge = "sharp" | "round";
 export type FontFamily = "hand-drawn" | "normal" | "code";
-export type FontSize = "Small" | "Medium" | "Large";
+export type FontSize = "Small" | "Medium" | "Large" | "Extra Large";
 export type TextAlign = "left" | "center" | "right";
 
 export const LOCALSTORAGE_CANVAS_KEY = "single_user_canvas_shapes"; // Kept for local dev fallback check
@@ -32,6 +33,18 @@ export interface Bounds {
     y: number;
     width: number;
     height: number;
+}
+
+export interface MultiSelectionState {
+    selectedShapes: Shape[];
+    bounds?: Bounds;
+    isDragging: boolean;
+}
+
+export interface ZoomState {
+    scale: number;
+    minScale: number;
+    maxScale: number;
 }
 
 export interface ShapeBase {
@@ -69,6 +82,7 @@ export type Shape =
         toY: number;
         strokeStyle: StrokeStyle;
         roughStyle: RoughStyle;
+        strokeType?: StrokeType;
     })
     | {
         id: string;
@@ -88,11 +102,13 @@ export type Shape =
         width: number;
         height: number;
         text: string;
+        lines: string[]; // Support for multi-line text
         fontSize: FontSize;
         fontFamily: FontFamily;
         textAlign: TextAlign;
         strokeFill: string;
-        strokeWidth: StrokeWidth; // Added for consistency
-        strokeEdge?: StrokeEdge; // Added for compatibility
-        bgFill?: string; // Type consistency
+        strokeWidth: StrokeWidth;
+        strokeEdge?: StrokeEdge;
+        bgFill?: string;
+        lineHeight?: number; // Line spacing multiplier
     };

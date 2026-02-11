@@ -6,6 +6,7 @@ export const FONT_SIZE_MAP: Record<FontSize, number> = {
     Small: 16,
     Medium: 24,
     Large: 32,
+    "Extra Large": 48,
 };
 
 export function getFontSize(size: FontSize, scale: number): number {

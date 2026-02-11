@@ -26,6 +26,8 @@ export class CanvasEngine {
 
     // Pan & Zoom State
     private scale: number = 1;
+    private minScale: number = 0.1;
+    private maxScale: number = 10;
     private panX: number = 0;
     private panY: number = 0;
     private isPanning: boolean = false;
@@ -131,14 +133,86 @@ export class CanvasEngine {
     }
 
     public setScale(scale: number) {
-        this.scale = scale;
+        this.scale = Math.max(this.minScale, Math.min(this.maxScale, scale));
         this.render();
+    }
+
+    public zoomIn(centerX?: number, centerY?: number) {
+        const oldScale = this.scale;
+        const newScale = Math.min(this.maxScale, this.scale * 1.2);
+        this.zoomToPoint(newScale, centerX, centerY, oldScale);
+    }
+
+    public zoomOut(centerX?: number, centerY?: number) {
+        const oldScale = this.scale;
+        const newScale = Math.max(this.minScale, this.scale / 1.2);
+        this.zoomToPoint(newScale, centerX, centerY, oldScale);
+    }
+
+    public resetZoom() {
+        this.scale = 1;
+        this.panX = 0;
+        this.panY = 0;
+        this.render();
+    }
+
+    private zoomToPoint(newScale: number, centerX?: number, centerY?: number, oldScale?: number) {
+        const prevScale = oldScale || this.scale;
+        
+        if (centerX !== undefined && centerY !== undefined) {
+            // Zoom towards specific point
+            const scaleFactor = newScale / prevScale;
+            this.panX = centerX - (centerX - this.panX) * scaleFactor;
+            this.panY = centerY - (centerY - this.panY) * scaleFactor;
+        }
+        
+        this.scale = newScale;
+        this.render();
+    }
+
+    public getZoomInfo() {
+        return {
+            scale: this.scale,
+            minScale: this.minScale,
+            maxScale: this.maxScale,
+            canZoomIn: this.scale < this.maxScale,
+            canZoomOut: this.scale > this.minScale
+        };
     }
 
     public clear() {
         this.shapes = [];
         this.save();
         this.render();
+    }
+
+    public setStrokeWidth(width: StrokeWidth) {
+        this.strokeWidth = width;
+    }
+
+    public setStrokeStyle(style: StrokeStyle) {
+        this.strokeStyle = style;
+    }
+
+    public setRoughStyle(style: RoughStyle) {
+        this.roughStyle = style;
+    }
+
+    public setFillStyle(style: FillStyle) {
+        this.fillStyle = style;
+    }
+
+    public getCurrentStyles() {
+        return {
+            strokeWidth: this.strokeWidth,
+            strokeStyle: this.strokeStyle,
+            strokeFill: this.strokeFill,
+            bgFill: this.bgFill,
+            roughStyle: this.roughStyle,
+            fillStyle: this.fillStyle,
+            fontFamily: this.fontFamily,
+            fontSize: this.fontSize
+        };
     }
 
     public resize() {
@@ -225,13 +299,33 @@ export class CanvasEngine {
 
         this.shapes.forEach(shape => this.drawShape(shape));
 
-        if (this.activeTool === "selection" && this.selectionController.getSelectedShape()) {
-            const bounds = this.selectionController.getShapeBounds(this.selectionController.getSelectedShape()!);
-            this.selectionController.drawSelectionBox(bounds);
+        // Draw selections
+        if (this.activeTool === "selection") {
+            // Draw single selection box
+            if (this.selectionController.getSelectedShape() && !this.selectionController.hasMultipleSelected()) {
+                const bounds = this.selectionController.getShapeBounds(this.selectionController.getSelectedShape()!);
+                this.selectionController.drawSelectionBox(bounds);
+            }
+            
+            // Draw multi-selection
+            if (this.selectionController.hasMultipleSelected()) {
+                this.selectionController.drawMultiSelection();
+            }
+            
+            // Draw selection rectangle
+            this.selectionController.drawSelectionRect();
         }
     }
 
     private drawShape(shape: Shape) {
+        const getStrokeDash = (style: string) => {
+            switch (style) {
+                case 'dashed': return [8, 6];
+                case 'dotted': return [2, 4];
+                default: return undefined;
+            }
+        };
+
         const options = {
             stroke: shape.strokeFill,
             strokeWidth: shape.strokeWidth,
@@ -239,7 +333,7 @@ export class CanvasEngine {
             bowing: 0,
             fill: 'bgFill' in shape ? shape.bgFill : undefined,
             fillStyle: 'solid',
-            strokeLineDash: 'strokeStyle' in shape && shape.strokeStyle === 'dashed' ? [5, 5] : undefined
+            strokeLineDash: 'strokeStyle' in shape ? getStrokeDash(shape.strokeStyle) : undefined
         };
 
         switch (shape.type) {
@@ -279,11 +373,23 @@ export class CanvasEngine {
                 this.ctx.restore();
                 break;
             case "text":
+                this.ctx.save();
                 this.ctx.font = `${getFontSize(shape.fontSize, 1)}px sans-serif`;
                 this.ctx.fillStyle = shape.strokeFill;
                 this.ctx.textAlign = shape.textAlign;
                 this.ctx.textBaseline = "top";
-                this.ctx.fillText(shape.text, shape.x, shape.y);
+                
+                // Handle multi-line text
+                if (shape.lines && shape.lines.length > 0) {
+                    const lineHeight = (shape.lineHeight || 1.2) * getFontSize(shape.fontSize, 1);
+                    shape.lines.forEach((line, index) => {
+                        this.ctx.fillText(line, shape.x, shape.y + (index * lineHeight));
+                    });
+                } else {
+                    // Fallback to single line
+                    this.ctx.fillText(shape.text, shape.x, shape.y);
+                }
+                this.ctx.restore();
                 break;
         }
     }
@@ -317,22 +423,49 @@ export class CanvasEngine {
         // SELECTION
         if (this.activeTool === "selection") {
             const selected = this.selectionController.getSelectedShape();
-            if (selected) {
+            const selectedShapes = this.selectionController.getSelectedShapes();
+            const hasMultiple = this.selectionController.hasMultipleSelected();
+
+            // Check for resize handles on single selection
+            if (selected && !hasMultiple) {
                 const bounds = this.selectionController.getShapeBounds(selected);
                 const handle = this.selectionController.getResizeHandleAtPoint(x, y, bounds);
                 if (handle) {
                     this.selectionController.startResizing(x, y);
                     return;
                 }
-                if (this.selectionController.isPointInShape(x, y, selected)) {
-                    this.selectionController.startDragging(x, y);
-                    return;
-                }
             }
 
+            // Check if clicking on existing selections
             const clickedShape = this.shapes.slice().reverse().find(s => this.selectionController.isPointInShape(x, y, s));
-            this.selectionController.setSelectedShape(clickedShape || null);
-            if (clickedShape) this.selectionController.startDragging(x, y);
+            
+            if (e.ctrlKey || e.metaKey) {
+                // Multi-selection with Ctrl/Cmd
+                if (clickedShape) {
+                    if (selectedShapes.includes(clickedShape)) {
+                        this.selectionController.removeFromSelection(clickedShape);
+                    } else {
+                        this.selectionController.addToSelection(clickedShape);
+                    }
+                }
+            } else if (clickedShape && selectedShapes.includes(clickedShape)) {
+                // Start dragging existing selection(s)
+                if (hasMultiple) {
+                    this.selectionController.startMultiDragging(x, y);
+                } else {
+                    this.selectionController.startDragging(x, y);
+                }
+            } else if (clickedShape) {
+                // New single selection
+                this.selectionController.clearSelection();
+                this.selectionController.setSelectedShape(clickedShape);
+                this.selectionController.startDragging(x, y);
+            } else {
+                // Start selection rectangle
+                this.selectionController.clearSelection();
+                this.selectionController.startSelectionRect(x, y);
+            }
+            
             this.render();
             return;
         }
@@ -381,11 +514,18 @@ export class CanvasEngine {
         // SELECTION
         if (this.activeTool === "selection") {
             const { x, y } = this.getWorldPos(e);
+            
             if (this.selectionController.isDraggingShape()) {
                 this.selectionController.updateDragging(x, y);
                 this.render();
             } else if (this.selectionController.isResizingShape()) {
                 this.selectionController.updateResizing(x, y);
+                this.render();
+            } else if (this.selectionController.hasMultipleSelected()) {
+                this.selectionController.updateMultiDragging(x, y);
+                this.render();
+            } else if (this.selectionController.isSelectingRect()) {
+                this.selectionController.updateSelectionRect(x, y);
                 this.render();
             }
             return;
@@ -439,6 +579,12 @@ export class CanvasEngine {
             return;
         }
 
+        // Handle selection rectangle completion
+        if (this.activeTool === "selection" && this.selectionController.isSelectingRect()) {
+            const selectedShapes = this.selectionController.finishSelectionRect(this.shapes);
+            this.selectionController.selectMultiple(selectedShapes);
+        }
+
         this.isDrawing = false;
         this.selectionController.stopDragging();
         this.selectionController.stopResizing();
@@ -456,34 +602,66 @@ export class CanvasEngine {
             left: `${clientX}px`,
             top: `${clientY}px`,
             background: "transparent",
-            border: "none",
+            border: "2px solid #3b82f6",
+            borderRadius: "4px",
             outline: "none",
             color: this.strokeFill,
             font: `${getFontSize(this.fontSize, this.scale)}px sans-serif`,
             zIndex: "100",
             margin: "0",
-            padding: "0",
-            resize: "none"
+            padding: "4px",
+            resize: "both",
+            minWidth: "100px",
+            minHeight: "30px",
+            maxWidth: "500px",
+            maxHeight: "300px",
+            overflow: "hidden"
         });
 
+        // Auto-resize on input
+        const autoResize = () => {
+            textarea.style.height = 'auto';
+            textarea.style.height = Math.min(textarea.scrollHeight, 300) + 'px';
+            textarea.style.width = Math.max(textarea.scrollWidth, 100) + 'px';
+        };
+
         container.appendChild(textarea);
-        setTimeout(() => textarea.focus(), 10);
+        setTimeout(() => {
+            textarea.focus();
+            autoResize();
+        }, 10);
+
+        textarea.addEventListener('input', autoResize);
 
         const handleBlur = () => {
-            if (textarea.value.trim()) {
+            const text = textarea.value.trim();
+            if (text) {
+                const lines = text.split('\n');
+                const lineHeight = 1.2;
+                const fontSize = getFontSize(this.fontSize, 1);
+                
+                // Calculate text dimensions
+                this.ctx.save();
+                this.ctx.font = `${fontSize}px sans-serif`;
+                const maxWidth = Math.max(...lines.map(line => this.ctx.measureText(line).width));
+                const height = lines.length * fontSize * lineHeight;
+                this.ctx.restore();
+
                 this.shapes.push({
                     id: uuidv4(),
                     type: "text",
                     x: worldX,
                     y: worldY,
-                    width: 0,
-                    height: 0,
-                    text: textarea.value,
+                    width: maxWidth,
+                    height: height,
+                    text: text,
+                    lines: lines,
                     strokeWidth: 2,
                     strokeFill: this.strokeFill,
                     fontSize: this.fontSize,
                     fontFamily: this.fontFamily,
-                    textAlign: "left"
+                    textAlign: "left",
+                    lineHeight: lineHeight
                 });
                 this.save();
                 this.render();
@@ -493,21 +671,38 @@ export class CanvasEngine {
 
         textarea.addEventListener("blur", handleBlur);
         textarea.addEventListener("keydown", (e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (e.key === "Escape") {
                 e.preventDefault();
-                textarea.blur();
+                textarea.remove();
             }
+            // Allow Enter for new lines
         });
     }
 
     private setupEventListeners() {
         this.canvas.addEventListener("mousedown", this.handleMouseDown);
+        this.canvas.addEventListener("wheel", this.handleWheel, { passive: false });
         window.addEventListener("mousemove", this.handleMouseMove);
         window.addEventListener("mouseup", this.handleMouseUp);
     }
 
+    private handleWheel = (e: WheelEvent) => {
+        e.preventDefault();
+        
+        const rect = this.canvas.getBoundingClientRect();
+        const centerX = e.clientX - rect.left;
+        const centerY = e.clientY - rect.top;
+        
+        if (e.deltaY < 0) {
+            this.zoomIn(centerX, centerY);
+        } else {
+            this.zoomOut(centerX, centerY);
+        }
+    };
+
     public destroy() {
         this.canvas.removeEventListener("mousedown", this.handleMouseDown);
+        this.canvas.removeEventListener("wheel", this.handleWheel);
         window.removeEventListener("mousemove", this.handleMouseMove);
         window.removeEventListener("mouseup", this.handleMouseUp);
     }
