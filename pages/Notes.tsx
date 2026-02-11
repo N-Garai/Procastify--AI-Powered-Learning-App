@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } from "react";
 import { Note, NoteElement, UserPreferences, Folder } from "../types";
 import {
   Plus,
@@ -14,14 +14,20 @@ import {
   GripVertical,
   FolderOpen,
   X,
+  Upload,
+  Wand2,
+  Loader2
 } from "lucide-react";
 import DocumentEditor from "../components/DocumentEditor";
-import CanvasBoard from "../components/CanvasBoard";
+import CanvasBoard, { CanvasBoardRef } from "../components/CanvasBoard";
+import MigrationHub from "../components/MigrationHub";
 import { StorageService } from "../services/storageService";
+import { generateDiagramFromText, convertSpecToShapes } from "../services/diagramService";
+import { Shape } from "../components/canvas/types";
 
 interface NotesProps {
   notes: Note[];
-  setNotes: (notes: Note[]) => void;
+  setNotes: Dispatch<SetStateAction<Note[]>>;
   onDeleteNote: (id: string) => Promise<void>;
   user: UserPreferences;
   onNavigate: (view: any, folderId?: string | null) => void;
@@ -44,11 +50,17 @@ const Notes: React.FC<NotesProps> = ({
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [search, setSearch] = useState("");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [showMigrationHub, setShowMigrationHub] = useState(false);
 
   // Resizable split view state
   const [splitPosition, setSplitPosition] = useState(50); // Percentage (0-100)
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const canvasBoardRef = useRef<CanvasBoardRef>(null);
+
+  // Diagram generation state
+  const [isGeneratingDiagram, setIsGeneratingDiagram] = useState(false);
+  const [diagramError, setDiagramError] = useState<string | null>(null);
 
   // Handle mouse move during drag
   const handleMouseMove = useCallback(
@@ -115,6 +127,26 @@ const Notes: React.FC<NotesProps> = ({
     }
     // Fallback for empty or legacy: Return empty array to let Editor initialize default
     return [];
+  };
+
+  const handleMigrationImport = async (blocks: any[], title: string) => {
+    const newNote: Note = {
+      id: Date.now().toString(),
+      userId: user.id,
+      title: title || "Imported Note",
+      tags: ["Imported"],
+      folder: "General",
+      folderId: activeFolderId !== undefined ? activeFolderId : null,
+      lastModified: Date.now(),
+      document: { blocks },
+      canvas: { elements: [] },
+      elements: [],
+      createdAt: Date.now(),
+    };
+    await StorageService.saveNote(newNote);
+    setNotes([newNote, ...notes]);
+    setShowMigrationHub(false);
+    setSelectedNoteId(newNote.id);
   };
 
   const createNote = async () => {
@@ -223,6 +255,52 @@ const Notes: React.FC<NotesProps> = ({
     }
   };
 
+  const handleGenerateDiagram = async (selectedText: string, selectedBlockIds: string[]) => {
+    if (!activeNote || !canvasBoardRef.current) return;
+
+    setIsGeneratingDiagram(true);
+    setDiagramError(null);
+
+    try {
+      console.log("[Notes.tsx] Generating diagram from selected text:", selectedText.substring(0, 100) + "...");
+
+      const diagramSpec = await generateDiagramFromText(selectedText);
+
+      if (!diagramSpec) {
+        setDiagramError("Failed to generate diagram. Please try again.");
+        return;
+      }
+
+      console.log("[Notes.tsx] Diagram spec generated:", diagramSpec);
+
+      const shapes = convertSpecToShapes(diagramSpec);
+
+      if (shapes.length === 0) {
+        setDiagramError("No diagram elements generated from the text.");
+        return;
+      }
+
+      canvasBoardRef.current.addShapes(shapes);
+
+      // Switch to canvas view if not already visible
+      if (viewMode === "document") {
+        setViewMode("split");
+      }
+
+      console.log("[Notes.tsx] Successfully added", shapes.length, "shapes to canvas");
+
+      setTimeout(() => {
+        alert(`Generated ${shapes.length} diagram elements!`);
+      }, 100);
+
+    } catch (error) {
+      console.error("[Notes.tsx] Diagram generation error:", error);
+      setDiagramError("An error occurred while generating the diagram.");
+    } finally {
+      setIsGeneratingDiagram(false);
+    }
+  };
+
   // Filter notes based on active folder
   const filteredNotes = notes.filter((note) => {
     // Search filter
@@ -294,6 +372,12 @@ const Notes: React.FC<NotesProps> = ({
               className="bg-[#2b2d31] hover:bg-[#3f4147] border border-white/5 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-all font-medium"
             >
               <Globe size={18} /> Community
+            </button>
+            <button
+              onClick={() => setShowMigrationHub(true)}
+              className="bg-[#2b2d31] hover:bg-[#3f4147] border border-white/5 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-all font-medium"
+            >
+              <Upload size={18} /> Import
             </button>
             <button
               onClick={createNote}
@@ -418,6 +502,13 @@ const Notes: React.FC<NotesProps> = ({
             )}
           </div>
         )}
+
+        {showMigrationHub && (
+          <MigrationHub
+            onImport={handleMigrationImport}
+            onClose={() => setShowMigrationHub(false)}
+          />
+        )}
       </div>
     );
   }
@@ -484,29 +575,50 @@ const Notes: React.FC<NotesProps> = ({
               <div className="w-[1px] h-6 bg-white/10 mx-1"></div>
             </>
           )}
-          <button
-            onClick={() => setViewMode("document")}
-            className={`p-2 rounded-md transition-all flex items-center gap-2 ${viewMode === "document" ? "bg-[#5865F2] text-white" : "text-discord-textMuted hover:text-white"}`}
-            title="Document Only"
-          >
-            <FileText size={18} />
-          </button>
-          <div className="w-[1px] bg-white/10 my-1 mx-1"></div>
-          <button
-            onClick={() => setViewMode("split")}
-            className={`p-2 rounded-md transition-all flex items-center gap-2 ${viewMode === "split" ? "bg-[#5865F2] text-white" : "text-discord-textMuted hover:text-white"}`}
-            title="Split View"
-          >
-            <SplitSquareHorizontal size={18} />
-          </button>
-          <div className="w-[1px] bg-white/10 my-1 mx-1"></div>
-          <button
-            onClick={() => setViewMode("canvas")}
-            className={`p-2 rounded-md transition-all flex items-center gap-2 ${viewMode === "canvas" ? "bg-[#5865F2] text-white" : "text-discord-textMuted hover:text-white"}`}
-            title="Canvas Only"
-          >
-            <ImageIcon size={18} />
-          </button>
+
+          {isGeneratingDiagram && (
+            <div className="flex items-center gap-2 px-3 text-blue-400">
+              <Loader2 size={18} className="animate-spin" />
+              <span className="text-sm">Generating Diagram...</span>
+            </div>
+          )}
+
+          {diagramError && (
+            <div className="flex items-center gap-2 px-3 text-red-400" title={diagramError}>
+              <span className="text-sm">{diagramError}</span>
+              <button onClick={() => setDiagramError(null)} className="hover:text-red-300">
+                <X size={14} />
+              </button>
+            </div>
+          )}
+
+          {!isGeneratingDiagram && !diagramError && (
+            <>
+              <button
+                onClick={() => setViewMode("document")}
+                className={`p-2 rounded-md transition-all flex items-center gap-2 ${viewMode === "document" ? "bg-[#5865F2] text-white" : "text-discord-textMuted hover:text-white"}`}
+                title="Document Only"
+              >
+                <FileText size={18} />
+              </button>
+              <div className="w-[1px] bg-white/10 my-1 mx-1"></div>
+              <button
+                onClick={() => setViewMode("split")}
+                className={`p-2 rounded-md transition-all flex items-center gap-2 ${viewMode === "split" ? "bg-[#5865F2] text-white" : "text-discord-textMuted hover:text-white"}`}
+                title="Split View"
+              >
+                <SplitSquareHorizontal size={18} />
+              </button>
+              <div className="w-[1px] bg-white/10 my-1 mx-1"></div>
+              <button
+                onClick={() => setViewMode("canvas")}
+                className={`p-2 rounded-md transition-all flex items-center gap-2 ${viewMode === "canvas" ? "bg-[#5865F2] text-white" : "text-discord-textMuted hover:text-white"}`}
+                title="Canvas Only"
+              >
+                <ImageIcon size={18} />
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -523,6 +635,7 @@ const Notes: React.FC<NotesProps> = ({
             <DocumentEditor
               content={getDocumentContent(activeNote)}
               onUpdate={updateDocumentContent}
+              onGenerateDiagram={!isGeneratingDiagram ? handleGenerateDiagram : undefined}
             />
           </div>
         )}
@@ -550,7 +663,7 @@ const Notes: React.FC<NotesProps> = ({
               width: viewMode === "split" ? `${100 - splitPosition}%` : "100%",
             }}
           >
-            <CanvasBoard canvasId={activeNote.id} readOnly={false} />
+            <CanvasBoard canvasId={activeNote.id} readOnly={false} ref={canvasBoardRef} />
           </div>
         )}
       </div>
