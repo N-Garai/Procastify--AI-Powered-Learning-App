@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ViewState, UserPreferences, Summary, Note, RoutineTask, UserStats, Flashcard, NoteElement } from './types';
+import { ViewState, UserPreferences, Summary, Note, RoutineTask, UserStats, Flashcard, NoteElement, Folder, UserRole } from './types';
 import { StorageService } from './services/storageService';
 import { auth } from './firebaseConfig';
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
@@ -14,6 +14,14 @@ import Focus from './pages/Focus';
 import QuizPage from './pages/Quiz';
 import NoteFeed from './pages/NoteFeed';
 import NotesStore from './pages/NotesStore';
+import Auth from './pages/Auth';
+import RoleSelection from './pages/RoleSelection';
+import TeacherDashboard from './pages/TeacherDashboard';
+import Folders from './pages/Folders';
+import Classrooms from './pages/Classrooms';
+import ClassroomDetail from './pages/ClassroomDetail';
+import StudentClassrooms from './pages/StudentClassrooms';
+import StudentClassroomView from './pages/StudentClassroomView';
 import { AlertCircle, LogIn, X, Loader2 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -29,6 +37,13 @@ const App: React.FC = () => {
   );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedClassroomId, setSelectedClassroomId] = useState<string | undefined>(undefined);
+
+  // Auth State
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [emailInput, setEmailInput] = useState("");
+  const [passwordInput, setPasswordInput] = useState("");
+  const [authError, setAuthError] = useState("");
 
   // Folder filtering state
   const [activeFolderId, setActiveFolderId] = useState<
@@ -130,6 +145,20 @@ const App: React.FC = () => {
     StorageService.setSession(updatedUser);
     setUser(updatedUser);
     setView("dashboard");
+  };
+
+  const handleAuthSubmit = async () => {
+    setAuthError("");
+    try {
+      if (isSignUp) {
+        await createUserWithEmailAndPassword(auth, emailInput, passwordInput);
+      } else {
+        await signInWithEmailAndPassword(auth, emailInput, passwordInput);
+      }
+      setShowLoginModal(false);
+    } catch (err: any) {
+      setAuthError(err.message);
+    }
   };
 
   const handleLogout = async () => {
@@ -285,8 +314,33 @@ const App: React.FC = () => {
       await StorageService.saveNote(noteToSave);
     }
 
-    if (!user || view === 'landing') {
-        return (
+
+  };
+
+  if (loadingAuth) {
+    return (
+      <div className="min-h-screen bg-[#1e1f22] flex items-center justify-center text-white">
+        <Loader2 className="animate-spin mr-2" /> Loading Procastify...
+      </div>
+    );
+  }
+
+  if (view === "auth") {
+    return (
+      <Auth
+        onLoginSuccess={() => setView("dashboard")}
+        onGuestAccess={handleGuestAccess}
+        onBack={user ? () => setView("dashboard") : () => setView("landing")}
+      />
+    );
+  }
+
+  if (view === "roleSelection") {
+    return <RoleSelection onRoleSelected={handleRoleSelected} />;
+  }
+
+  if (!user || view === "landing") {
+    return (
             <>
                 <Landing onLogin={() => setShowLoginModal(true)} onGuestAccess={handleGuestAccess} />
 
@@ -334,168 +388,6 @@ const App: React.FC = () => {
                     </div>
                 )}
             </>
-        );
-    }
-  };
-
-  if (loadingAuth) {
-    return (
-      <div className="min-h-screen bg-[#1e1f22] flex items-center justify-center text-white">
-        <Loader2 className="animate-spin mr-2" /> Loading Procastify...
-      </div>
-    );
-  }
-
-  if (view === "auth") {
-    return (
-      <Auth
-        onLoginSuccess={() => setView("dashboard")}
-        onGuestAccess={handleGuestAccess}
-        onBack={user ? () => setView("dashboard") : () => setView("landing")}
-      />
-    );
-  }
-
-  if (view === "roleSelection") {
-    return <RoleSelection onRoleSelected={handleRoleSelected} />;
-  }
-
-  if (!user || view === "landing") {
-    return (
-        <div className="flex min-h-screen bg-app-bg">
-            <Sidebar
-                currentView={view}
-                onNavigate={setView}
-                onLogout={handleLogout}
-                collapsed={sidebarCollapsed}
-                onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-            />
-            <main className={`flex-1 ${sidebarCollapsed ? 'ml-20' : 'ml-64'} overflow-y-auto max-h-screen relative transition-all duration-300 ease-in-out`}>
-                {/* User Context Bar (Small) */}
-                {user.isGuest && (
-                    <div className="bg-indigo-900/30 border-b border-indigo-500/20 px-4 py-1 text-xs text-indigo-200 flex justify-between items-center sticky top-0 z-50 backdrop-blur-md">
-                        <span>Guest Mode: Data saved to this device only.</span>
-                        <button onClick={() => setShowLoginModal(true)} className="hover:text-white underline">Sign up to sync</button>
-                    </div>
-                )}
-
-                {view === 'dashboard' && stats && <Dashboard user={user} summaries={summaries} notes={notes} stats={stats} onNoteClick={(noteId) => {
-
-                    setView('notes');
-                }} />}
-
-                {view === 'summarizer' && (
-                    <Summarizer
-                        onSave={async (s) => {
-                            const sWithUser = { ...s, userId: user.id };
-                            const newSums = [sWithUser, ...summaries];
-                            setSummaries(newSums);
-                            await StorageService.saveSummaries(newSums);
-                        }}
-                        notes={notes}
-                        onAddToNote={handleAddToNote}
-                    />
-                )}
-
-                {view === 'notes' && (
-                    <Notes
-                        notes={notes}
-                        setNotes={(newNotes) => {
-                            setNotes(newNotes);
-                            StorageService.saveNotes(newNotes);
-                        }}
-                        onDeleteNote={async (noteId) => {
-                            // strictly handle the flow: Service(Firestore/Storage) -> Local State
-                            await StorageService.deleteNote(noteId);
-                            setNotes(prev => prev.filter(n => n.id !== noteId));
-                            console.log("[DELETE] Removed from local React state:", noteId);
-                        }}
-                        user={user}
-                        onNavigate={setView}
-                    />
-                )}
-
-                {view === 'routine' && (
-                    <Routine
-                        user={user}
-                        setUser={async (u) => {
-                            await StorageService.saveUserProfile(u);
-                            setUser(u);
-                        }}
-                        notes={notes}
-                        setNotes={(n) => { setNotes(n); StorageService.saveNotes(n); }}
-                        onStartTask={handleStartFocus}
-                    />
-                )}
-
-
-                {view === 'quiz' && <QuizPage notes={notes} user={user} stats={stats} setStats={setStats} />}
-
-                {view === 'feed' && (
-                    <NoteFeed
-                        notes={notes}
-                        user={user}
-                        onClose={() => setView('dashboard')}
-                    />
-                )}
-
-                {view === 'store' && (
-                    <NotesStore
-                        user={user}
-                        onImportNote={(newNote) => {
-                            setNotes([newNote, ...notes]);
-                            StorageService.saveNote(newNote); // Ensure persistence immediately
-                            setView('notes');
-                        }}
-                        onNavigate={setView}
-                    />
-                )}
-            </main>
-
-
-            {showLoginModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-                        <div className="bg-app-panel p-8 rounded-2xl w-full max-w-md border border-app-border shadow-2xl animate-in zoom-in-95">
-                            <div className="flex justify-between items-center mb-6">
-                                <h2 className="text-xl font-bold text-app-text">Sync Account</h2>
-                            <button onClick={() => setShowLoginModal(false)} className="text-gray-400 hover:text-white"><X /></button>
-                        </div>
-
-                        {authError && <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-lg">{authError}</div>}
-
-                        <p className="text-app-textMuted mb-6">Create an account to sync your current guest data to the cloud.</p>
-                        <input
-                            type="email"
-                            className="w-full bg-black/20 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-[#5865F2] mb-4"
-                            placeholder="Email"
-                            value={emailInput}
-                            onChange={(e) => setEmailInput(e.target.value)}
-                        />
-                        <input
-                            type="password"
-                            className="w-full bg-black/20 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-[#5865F2] mb-6"
-                            placeholder="Password"
-                            value={passwordInput}
-                            onChange={(e) => setPasswordInput(e.target.value)}
-                        />
-                        <button
-                            onClick={handleAuthSubmit}
-                            disabled={!emailInput || !passwordInput}
-                            className="w-full bg-[#5865F2] hover:bg-[#4752c4] text-white font-bold py-3 rounded-xl transition-all disabled:opacity-50"
-                        >
-                            {isSignUp ? 'Sign Up & Sync' : 'Sign In & Sync'}
-                        </button>
-                        <p className="text-center text-sm text-app-textMuted mt-4">
-                            {isSignUp ? "Already have an account?" : "Don't have an account?"}
-                            <button onClick={() => setIsSignUp(!isSignUp)} className="ml-2 text-[#5865F2] hover:underline font-bold">
-                                {isSignUp ? 'Sign In' : 'Sign Up'}
-                            </button>
-                        </p>
-                    </div>
-                </div>
-            )}
-
-        </div>
     );
   }
 

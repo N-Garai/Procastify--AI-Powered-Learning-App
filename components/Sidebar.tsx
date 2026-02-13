@@ -1,6 +1,6 @@
 import React from 'react';
-import { ViewState } from '../types';
-import { LayoutDashboard, FileText, BookOpen, Clock, BrainCircuit, Gamepad2, LogOut, Flame, Globe, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { ViewState, UserRole } from '../types';
+import { LayoutDashboard, FileText, BookOpen, Clock, BrainCircuit, Gamepad2, LogOut, Flame, Globe, PanelLeftClose, PanelLeftOpen, GraduationCap, Users } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 
 interface SidebarProps {

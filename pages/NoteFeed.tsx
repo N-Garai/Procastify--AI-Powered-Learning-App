@@ -1,62 +1,149 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Note, UserPreferences } from '../types';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, Share2, MessageCircle, MoreHorizontal, ArrowLeft, BookOpen, Clock, CheckCircle, Play, RefreshCw, Zap } from 'lucide-react';
-import { generateReels } from '../services/geminiService';
+import {
+  Heart,
+  Share2,
+  MessageCircle,
+  MoreHorizontal,
+  ArrowLeft,
+  BookOpen,
+  Clock,
+  CheckCircle,
+  Play,
+  RefreshCw,
+  Zap,
+  Image as ImageIcon,
+  Video,
+  FileText,
+} from "lucide-react";
+import { generateReels } from "../services/geminiService";
 
 interface NoteFeedProps {
-    notes: Note[];
-    user: UserPreferences;
-    onClose: () => void;
+  notes: Note[];
+  user: UserPreferences;
+  onClose: () => void;
 }
+
+type ReelType = "text" | "image" | "video";
 
 interface ReelItem {
-    id: string;
-    noteId: string;
-    noteTitle: string;
-    content: string;
-    index: number; // 1-5
+  id: string;
+  noteId: string;
+  noteTitle: string;
+  content: string;
+  type: ReelType;
+  index: number; // 1-5
 }
 
+// --- REEL COMPONENTS ---
+
+const TextReel = ({ reel }: { reel: ReelItem }) => (
+  <div className="px-8 py-12">
+    <p className="text-3xl md:text-4xl font-bold text-white leading-tight text-center drop-shadow-2xl font-serif">
+      {reel.content}
+    </p>
+  </div>
+);
+
+const ImageReel = ({ reel }: { reel: ReelItem }) => (
+  <div className="relative w-full h-full flex flex-col">
+    {/* Mock Image Placeholder */}
+    <div className="flex-1 bg-gradient-to-tr from-indigo-900 via-purple-900 to-pink-800 flex items-center justify-center relative overflow-hidden">
+      <div className="absolute inset-0 opacity-30 mix-blend-overlay bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
+      <ImageIcon size={64} className="text-white/20 mb-4" />
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent p-8 pt-24">
+        <p className="text-xl md:text-2xl font-bold text-white leading-snug font-sans">
+          {reel.content}
+        </p>
+      </div>
+    </div>
+  </div>
+);
+
+const VideoReel = ({ reel, isActive }: { reel: ReelItem; isActive: boolean }) => (
+  <div className="relative w-full h-full bg-black flex flex-col justify-center items-center">
+    {/* Video Mock UI */}
+    <div className="absolute inset-0 bg-gray-900 opacity-50"></div>
+    {/* Animated Background to simulate video content */}
+    <div className="absolute inset-0 bg-gradient-to-br from-blue-900/40 to-black animate-pulse" />
+
+    <div className="z-10 flex flex-col items-center gap-6 p-8 w-full max-w-lg text-center">
+      <div className="w-20 h-20 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center border border-white/30 cursor-pointer hover:scale-110 transition-transform">
+        <Play size={32} className="text-white fill-white ml-1" />
+      </div>
+
+      <div className="bg-black/60 backdrop-blur-md p-6 rounded-xl border border-white/10 mt-8">
+        <p className="text-lg md:text-xl font-medium text-white/90 leading-relaxed font-mono">
+          "{reel.content}"
+        </p>
+      </div>
+    </div>
+
+    {/* Progress Bar */}
+    <div className="absolute bottom-4 left-4 right-4 h-1 bg-white/20 rounded-full overflow-hidden">
+       <motion.div
+         initial={{ width: "0%" }}
+         animate={isActive ? { width: "100%" } : { width: "0%" }}
+         transition={{ duration: 5, ease: "linear", repeat: isActive ? Infinity : 0 }}
+         className="h-full bg-white"
+       />
+    </div>
+  </div>
+);
+
 // --- SIMPLIFIED CARD FOR REELS ---
-const ReelCard = ({ reel, isActive }: { reel: ReelItem; isActive: boolean }) => {
-    return (
-        <div className="h-full w-full flex items-center justify-center p-4 snap-start relative bg-black">
-            {/* Background Gradient Mesh - distinct for learning mode */}
-            <div className="absolute inset-0 bg-gradient-to-br from-[#1e1e24] to-[#0f0f12] z-0"></div>
+const ReelCard = ({
+  reel,
+  isActive,
+}: {
+  reel: ReelItem;
+  isActive: boolean;
+}) => {
+  return (
+    <div className="h-full w-full flex items-center justify-center snap-start relative bg-black overflow-hidden">
+      {/* Background Gradient Mesh - distinct for learning mode (Generic base) */}
+      <div className="absolute inset-0 bg-gradient-to-br from-[#1e1e24] to-[#0f0f12] z-0"></div>
 
-            {/* Subtle dynamic background */}
-            <div className="absolute inset-0 opacity-20 z-0 bg-[radial-gradient(circle_at_50%_120%,rgba(120,119,198,0.3),rgba(255,255,255,0))]" />
+      {reel.type === "text" && (
+        <div className="absolute inset-0 opacity-20 z-0 bg-[radial-gradient(circle_at_50%_120%,rgba(120,119,198,0.3),rgba(255,255,255,0))]" />
+      )}
 
-            <div className={`w-full h-full max-w-md relative flex flex-col justify-center z-10 transition-all duration-700 ${isActive ? 'opacity-100 scale-100' : 'opacity-40 scale-95 blur-sm'}`}>
-
-                {/* Minimal Header */}
-                <div className="absolute top-10 left-0 right-0 text-center px-6">
-                    <span className="inline-block py-1 px-3 rounded-full bg-white/5 border border-white/10 text-xs font-bold text-discord-textMuted uppercase tracking-widest backdrop-blur-md">
-                        {reel.noteTitle} • {reel.index}/5
-                    </span>
-                </div>
-
-                {/* MAIN CONTENT */}
-                <div className="px-8 py-12">
-                    <p className="text-3xl md:text-4xl font-bold text-white leading-tight text-center drop-shadow-2xl font-serif">
-                        {reel.content}
-                    </p>
-                </div>
-
-                {/* Footer hint */}
-                <div className="absolute bottom-12 left-0 right-0 text-center animate-bounce">
-                    <p className="text-xs text-white/30 font-medium">Swipe for next insight</p>
-                </div>
-            </div>
+      <div
+        className={`w-full h-full max-w-md relative flex flex-col justify-center z-10 transition-all duration-700 ${isActive ? "opacity-100 scale-100" : "opacity-40 scale-95 blur-sm"}`}
+      >
+        {/* Minimal Header */}
+        <div className="absolute top-10 left-0 right-0 text-center px-6 z-20">
+          <span className="inline-block py-1 px-3 rounded-full bg-black/40 border border-white/10 text-xs font-bold text-gray-300 uppercase tracking-widest backdrop-blur-md">
+            {reel.noteTitle} • {reel.index}/5
+          </span>
         </div>
-    );
+
+        {/* Content Body based on Type */}
+        <div className="flex-1 w-full h-full flex flex-col relative">
+            {reel.type === 'text' && <TextReel reel={reel} />}
+            {reel.type === 'image' && <ImageReel reel={reel} />}
+            {reel.type === 'video' && <VideoReel reel={reel} isActive={isActive} />}
+        </div>
+
+        {/* Footer hint */}
+        <div className="absolute bottom-12 left-0 right-0 text-center animate-bounce z-20 pointer-events-none">
+          <p className="text-xs text-white/50 font-medium">
+            Swipe for next insight
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const NoteFeed: React.FC<NoteFeedProps> = ({ notes, user, onClose }) => {
-    const [view, setView] = useState<'selection' | 'loading' | 'feed'>('selection');
-    const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
-    const [reels, setReels] = useState<ReelItem[]>([]);
+  const [view, setView] = useState<"selection" | "loading" | "feed">(
+    "selection",
+  );
+  const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
+  const [selectedFormat, setSelectedFormat] = useState<ReelType>("text");
+  const [reels, setReels] = useState<ReelItem[]>([]);
 
     // For Feed Scrolling
     const containerRef = useRef<HTMLDivElement>(null);
@@ -103,6 +190,7 @@ const NoteFeed: React.FC<NoteFeedProps> = ({ notes, user, onClose }) => {
                     noteId: note.id,
                     noteTitle: note.title,
                     content: point,
+                    type: selectedFormat, // Use selected format
                     index: idx + 1
                 });
             });
@@ -142,6 +230,32 @@ const NoteFeed: React.FC<NoteFeedProps> = ({ notes, user, onClose }) => {
 
                     {/* LEFT COLUMN: Note Selection (Vertical) */}
                     <div className="lg:col-span-2 flex flex-col min-h-0 bg-discord-panel/50 rounded-2xl border border-white/5 p-6">
+                        
+                        {/* Format Selection Helper */}
+                        <div className="mb-6 flex items-center gap-4 bg-black/20 p-2 rounded-xl">
+                            <span className="text-xs font-bold text-discord-textMuted uppercase ml-2">Format:</span>
+                            <div className="flex gap-2">
+                                <button 
+                                    onClick={() => setSelectedFormat('text')}
+                                    className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${selectedFormat === 'text' ? 'bg-discord-accent text-white shadow-lg' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}
+                                >
+                                    <FileText size={16} /> Text
+                                </button>
+                                <button 
+                                    onClick={() => setSelectedFormat('image')}
+                                    className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${selectedFormat === 'image' ? 'bg-pink-600 text-white shadow-lg' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}
+                                >
+                                    <ImageIcon size={16} /> Image
+                                </button>
+                                <button 
+                                    onClick={() => setSelectedFormat('video')}
+                                    className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${selectedFormat === 'video' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white/5 text-gray-400 hover:bg-white/10'}`}
+                                >
+                                    <Video size={16} /> Video
+                                </button>
+                            </div>
+                        </div>
+
                         <h3 className="text-sm font-bold text-discord-textMuted uppercase mb-4 flex items-center gap-2">
                             <BookOpen size={16} /> Available Notes
                         </h3>
@@ -190,7 +304,7 @@ const NoteFeed: React.FC<NoteFeedProps> = ({ notes, user, onClose }) => {
                         </div>
                     </div>
 
-                    {/* RIGHT COLUMN: Coming Soon Placeholder */}
+                    {/* RIGHT COLUMN: Info Panel */}
                     <div className="flex flex-col gap-6">
                         <div className="bg-gradient-to-br from-[#2b2d31] to-[#1e1f22] p-8 rounded-2xl border border-white/10 relative overflow-hidden group">
                             {/* Decorative Background Elements */}
@@ -199,32 +313,38 @@ const NoteFeed: React.FC<NoteFeedProps> = ({ notes, user, onClose }) => {
 
                             <div className="relative z-10">
                                 <span className="inline-block py-1 px-3 rounded-full bg-discord-accent/20 border border-discord-accent/30 text-discord-accent text-xs font-bold uppercase tracking-wider mb-4">
-                                    Coming Soon
+                                    Format: {selectedFormat.toUpperCase()}
                                 </span>
 
-                                <h3 className="text-2xl font-bold text-white mb-3">Immersive Learning</h3>
+                                <h3 className="text-2xl font-bold text-white mb-3">
+                                    {selectedFormat === 'text' && "Card-based Learning"}
+                                    {selectedFormat === 'image' && "Visual Flashcards"}
+                                    {selectedFormat === 'video' && "Video Summaries"}
+                                </h3>
                                 <p className="text-discord-textMuted text-sm leading-relaxed mb-6">
-                                    We're building a multimodal engine to turn your notes into video reels, image carousels, and interactive quizzes instantly.
+                                    {selectedFormat === 'text' && "Classic text-based cards for focused reading and quick absorbtion of facts."}
+                                    {selectedFormat === 'image' && "Visual representations of concepts to help visual learners retain information better."}
+                                    {selectedFormat === 'video' && "Dynamic video-style playback with scripted narration for an immersive experience."}
                                 </p>
 
                                 <div className="space-y-3">
-                                    <div className="flex items-center gap-3 text-sm text-gray-400 group-hover:text-gray-300 transition-colors">
+                                    <div className={`flex items-center gap-3 text-sm transition-colors ${selectedFormat === 'video' ? 'text-white' : 'text-gray-400'}`}>
                                         <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center">
                                             <Play size={14} className="text-purple-400" fill="currentColor" />
                                         </div>
                                         <span>AI Video Summaries</span>
                                     </div>
-                                    <div className="flex items-center gap-3 text-sm text-gray-400 group-hover:text-gray-300 transition-colors">
+                                    <div className={`flex items-center gap-3 text-sm transition-colors ${selectedFormat === 'image' ? 'text-white' : 'text-gray-400'}`}>
                                         <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center">
-                                            <Zap size={14} className="text-yellow-400" fill="currentColor" />
+                                            <ImageIcon size={14} className="text-yellow-400" />
                                         </div>
-                                        <span>Interactive Pop-Quizzes</span>
+                                        <span>Visual Learning</span>
                                     </div>
-                                    <div className="flex items-center gap-3 text-sm text-gray-400 group-hover:text-gray-300 transition-colors">
-                                        <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center">
-                                            <Share2 size={14} className="text-blue-400" />
+                                    <div className={`flex items-center gap-3 text-sm transition-colors ${selectedFormat === 'text' ? 'text-white' : 'text-gray-400'}`}>
+                                       <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center">
+                                            <FileText size={14} className="text-blue-400" />
                                         </div>
-                                        <span>Social Study Groups</span>
+                                        <span>Text Cards</span>
                                     </div>
                                 </div>
                             </div>
