@@ -314,7 +314,14 @@ const App: React.FC = () => {
       await StorageService.saveNote(noteToSave);
     }
 
-
+    if (noteWasCreated) {
+      await StorageService.updateStats((s) => ({
+        ...s,
+        notesCreated: (s.notesCreated || 0) + 1,
+      }));
+      const updatedStats = await StorageService.getStats();
+      setStats(updatedStats);
+    }
   };
 
   if (loadingAuth) {
@@ -563,12 +570,4 @@ const App: React.FC = () => {
   );
 };
 
-const ThemedApp: React.FC = () => {
-    return (
-        <ThemeProvider>
-            <App />
-        </ThemeProvider>
-    );
-};
-
-export default ThemedApp;
+export default App;
